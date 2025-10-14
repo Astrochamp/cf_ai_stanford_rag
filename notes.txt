@@ -5,12 +5,15 @@
 5. chunk articles & save chunks + metadata
 6. vectorise and normalise chunks, attach metadata, upload to Vectorize
 
-- convert href
+- convert hrefs e.g. `../`
 - remove images if present
-- remove tables
-- strip all html tags and keep content only
+- strip html tags and keep content only
 - parse html entities e.g. &quot; , &rsquo;
-- keep tex
+- chunk (don't break tex or tables)
+- process tex
+- process tables
+
+https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/rpc/
 
 <strong>Sakya Pa &#7751;&#7693;ita [sa skya pa &#7751;&#7693;i ta]</strong>
 search for " &#" and remove space

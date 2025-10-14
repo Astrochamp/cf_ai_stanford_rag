@@ -36,6 +36,8 @@ function processTex(text: string): string {
   });
 }
 
+
+
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     return new Response('Hello World!');
