@@ -1,7 +1,8 @@
 import * as cheerio from 'cheerio';
 import 'dotenv/config';
 import * as fs from 'fs';
-import { decode } from 'html-entities';
+import { decode as htmlDecode } from 'html-entities';
+import { encode as bpeEncode, decode as bpeDecode } from 'gpt-tokenizer';
 import { OpenAI } from "openai";
 import texToUnicodeMap from './data/tex-unicode-map.json';
 
@@ -30,94 +31,115 @@ type Article = {
   related: ArticleID[];
 };
 
-function htmlListToTextList(html: string): string {
-  const $ = cheerio.load(html);
-
-  function getOrderedListMarker(index: number, type: string = '1', reversed: boolean = false, start: number = 1): string {
-    const actualIndex = reversed ? start - index : start + index;
-
-    switch (type) {
-      case 'a':
-        return String.fromCharCode(96 + actualIndex) + '.'; // a, b, c, ...
-      case 'A':
-        return String.fromCharCode(64 + actualIndex) + '.'; // A, B, C, ...
-      case 'i':
-        return toRoman(actualIndex).toLowerCase() + '.'; // i, ii, iii, ...
-      case 'I':
-        return toRoman(actualIndex) + '.'; // I, II, III, ...
-      case '1':
-      default:
-        return actualIndex + '.'; // 1, 2, 3, ...
-    }
-  }
-
+function htmlListToTextList(htmlString: string): string {
   function toRoman(num: number): string {
-    const romanNumerals: [number, string][] = [
-      [1000, 'M'], [900, 'CM'], [500, 'D'], [400, 'CD'],
-      [100, 'C'], [90, 'XC'], [50, 'L'], [40, 'XL'],
-      [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']
-    ];
+    if (num < 1 || num > 3999 || !Number.isInteger(num)) {
+      // Standard Roman numerals are for positive integers in this range.
+      return num.toString();
+    }
 
-    let result = '';
-    for (const [value, numeral] of romanNumerals) {
-      while (num >= value) {
-        result += numeral;
-        num -= value;
+    // Mapping of Roman numerals to their integer values.
+    const romanMap: { [key: string]: number; } = {
+      M: 1000, CM: 900, D: 500, CD: 400,
+      C: 100, XC: 90, L: 50, XL: 40,
+      X: 10, IX: 9, V: 5, IV: 4, I: 1
+    };
+
+    let roman = '';
+    for (const key in romanMap) {
+      while (num >= romanMap[key]) {
+        roman += key;
+        num -= romanMap[key];
       }
+    }
+    return roman;
+  }
+
+  function toAlphabet(num: number): string {
+    if (num < 1 || !Number.isInteger(num)) {
+      return num.toString();
+    }
+    let result = '';
+    let tempNum = num;
+    while (tempNum > 0) {
+      // Adjust for 1-based indexing to 0-based for character codes.
+      const remainder = (tempNum - 1) % 26;
+      result = String.fromCharCode(65 + remainder) + result; // 65 is the char code for 'A'
+      tempNum = Math.floor((tempNum - 1) / 26);
     }
     return result;
   }
 
-  function processList(listElement: cheerio.Cheerio<any>, depth: number = 0): string {
-    const isOrdered = listElement.is('ol');
-    const indent = '  '.repeat(depth);
-    let result = '';
+  const $ = cheerio.load(htmlString);
 
-    // Get attributes for ordered lists
-    const type = listElement.attr('type') || '1';
-    const start = parseInt(listElement.attr('start') || '1', 10);
-    const reversed = listElement.attr('reversed') !== undefined;
-
-    listElement.children('li').each((index: number, li: any) => {
-      const $li = $(li);
-
-      // Get the marker for this list item
-      const marker = isOrdered
-        ? getOrderedListMarker(index, type, reversed, start)
-        : '-';
-
-      // Extract text content, excluding nested lists
-      const textContent = $li.clone()
-        .children('ul, ol')
-        .remove()
-        .end()
-        .text()
-        .trim();
-
-      if (textContent) {
-        result += `${indent}${marker} ${textContent}\n`;
-      }
-
-      // Process nested lists
-      $li.children('ul, ol').each((_, nestedList) => {
-        result += processList($(nestedList), depth + 1);
-      });
+  // --- Process Unordered Lists (<ul>) ---
+  $('ul').each((_, ul) => {
+    let textContent = '\n';
+    $(ul).children('li').each((_, li) => {
+      textContent += `- ${$(li).text().trim()}\n`;
     });
+    textContent = textContent.trimEnd() + '\n';
 
-    return result;
-  }
-
-  let output = '';
-
-  $('ul, ol').each((_, list) => {
-    const $list = $(list);
-    // Only process top-level lists (not nested ones)
-    if ($list.parent().is('li')) return;
-
-    output += processList($list);
+    // Replace the <ul> element with a <pre> tag containing the formatted text.
+    const preElement = $('<pre></pre>').text(textContent);
+    $(ul).replaceWith(preElement);
   });
 
-  return output.trim();
+  // --- Process Ordered Lists (<ol>) ---
+  $('ol').each((_, ol) => {
+    const $ol = $(ol);
+    const isReversed = $ol.attr('reversed') !== undefined;
+    const type = $ol.attr('type')?.toLowerCase() || '1';
+
+    // Determine the starting number for the list.
+    const startAttr = $ol.attr('start');
+    let counter = startAttr ? parseInt(startAttr, 10) : 1;
+    if (isNaN(counter)) {
+      counter = 1;
+    }
+
+    let textContent = '\n';
+    $ol.children('li').each((_, li) => {
+      let marker: string;
+
+      // Generate the appropriate list marker based on the 'type' attribute.
+      switch (type) {
+        case 'a':
+          marker = toAlphabet(counter).toLowerCase();
+          break;
+        case 'A':
+          marker = toAlphabet(counter).toUpperCase();
+          break;
+        case 'i':
+          marker = toRoman(counter).toLowerCase();
+          break;
+        case 'I':
+          marker = toRoman(counter).toUpperCase();
+          break;
+        case '1':
+        default:
+          marker = counter.toString();
+          break;
+      }
+
+      textContent += `${marker}. ${$(li).text().trim()}\n`;
+
+      // Increment or decrement the counter for the next item.
+      if (isReversed) {
+        counter--;
+      } else {
+        counter++;
+      }
+    });
+    textContent = textContent.trimEnd() + '\n';
+
+    // Replace the <ol> element with a <pre> tag.
+    const preElement = $('<pre></pre>').text(textContent);
+    $ol.replaceWith(preElement);
+  });
+
+  // Return the full, modified HTML.
+  return $.html();
 }
 
 function _replaceTexSymbols(text: string): string {
@@ -211,14 +233,22 @@ function normaliseWhitespace(text: string, keepNewLines = false): string {
 }
 
 function stripHTMLTags(html: string): string {
-  const PRESERVE_TAGS = new Set(['table', 'thead', 'tbody', 'tr', 'td', 'th', 'figure', 'figcaption']);
+  const PRESERVE_TAGS = new Set(['table', 'thead', 'tbody', 'tr', 'td', 'th', 'figure', 'figcaption', 'pre']);
   const REMOVE_WITH_CONTENT = new Set(['script', 'style', 'iframe', 'noscript']);
+  const PARAGRAPH_TAGS = new Set(['p', 'div', 'blockquote', 'li']);
 
   let text = html;
 
   REMOVE_WITH_CONTENT.forEach(tag => {
     const regex = new RegExp(`<${tag}[^>]*>.*?</${tag}>`, 'gis');
     text = text.replace(regex, '');
+  });
+
+  PARAGRAPH_TAGS.forEach(tag => {
+    const openRegex = new RegExp(`<${tag}[^>]*>`, 'gi');
+    const closeRegex = new RegExp(`</${tag}>`, 'gi');
+    text = text.replace(closeRegex, '\n\n');
+    text = text.replace(openRegex, '');
   });
 
   const preservedElements: { placeholder: string; content: string; }[] = [];
@@ -234,8 +264,16 @@ function stripHTMLTags(html: string): string {
     });
   });
 
-  text = text.replace(/<[^>]+>/g, ' ');
-  text = decode(text);
+  // debug
+  console.log("After removing certain tags:", text);
+
+  text = text.replace(/<[^>]+>/g, '');
+  text = htmlDecode(text);
+
+  text = text.replace(/\r/g, ''); // remove carriage returns
+  text = text.replace(/[ \t]+/g, ' '); // collapse horizontal whitespace
+  text = text.replace(/ *\n */g, '\n'); // remove spaces around newlines
+  text = text.replace(/\n{3,}/g, '\n\n'); // collapse 3+ newlines to 2
 
   preservedElements.forEach(({ placeholder, content }) => {
     text = text.replace(placeholder, content);
@@ -332,178 +370,125 @@ async function fetchArticleContent(id: ArticleID): Promise<Article> {
   };
 }
 
-// order: normaliseText -> normaliseWhitespace -> htmlListToTextList -> stripHTMLTags -> processTex (simple -> gpt) -> normaliseWhitespace (keepNewLines)
+async function preprocessText(text: string): Promise<string> {
+  // order: normaliseText -> htmlListToTextList -> stripHTMLTags -> processTex -> normaliseWhitespace (keepNewLines=true)
+
+  let processed = text;
+  processed = normaliseText(processed);
+  processed = normaliseWhitespace(processed);
+  processed = htmlListToTextList(processed);
+  processed = stripHTMLTags(processed); // converts p tags to \n\n
+  processed = await processTex(processed);
+  processed = normaliseWhitespace(processed, true);
+  return processed;
+}
+
+async function preprocessArticle(article: Article): Promise<Article> {
+  const preamble = await preprocessText(article.preamble);
+  const sections: ArticleSection[] = [];
+  for (const section of article.sections) {
+    const content = await preprocessText(section.content);
+    sections.push({
+      shortName: section.shortName,
+      number: section.number,
+      heading: section.heading,
+      content
+    });
+  }
+  return {
+    ...article,
+    preamble,
+    sections
+  };
+}
 
 // const artId = "wittgenstein" as ArticleID;
 // fetchArticleContent(artId).then(article => {
+//   const processedArticle = preprocessArticle(article);
 //   fs.mkdirSync('./data/articles', { recursive: true });
-//   fs.writeFileSync(`./data/articles/${artId}.json`, JSON.stringify(article, null, 2));
+//   fs.writeFileSync(`./data/articles/${artId}.json`, JSON.stringify(processedArticle, null, 2));
 //   console.log(`Article ${artId} saved.`);
 // }).catch(err => {
 //   console.error(`Error fetching article ${artId}:`, err);
 // });
 
-const example_text = `The truth-functional analysis of propositional logic proceeds by
-associating <i>n</i>-ary truth functions with the <i>n</i>-ary
-propositional connectives. The classical case considered thus far,
-where the truth value space is bivalent, admits a strikingly simple
-analysis. Observe first that the functions \\(f_1^3\\), \\(f_2^2\\), and
-\\(f_2^8\\) approximate the truth conditions of some uses of the natural
-language particles &ldquo;not&rdquo;, &ldquo;or&rdquo;, and
-&ldquo;and&rdquo; (another use of the particle &ldquo;or&rdquo; is
-arguably approximated by \\(f_2^7\\)). Thus if we associate these
-functions with the three connectives labeled earlier \\(\\neg\\),
-\\(\\vee\\), and \\(\\wedge\\), we could compute the truth value of complex
-formulas such as \\(\\neg\\rA\\vee\\neg(\\rB\\wedge\\rC)\\) given different
-possible assignments of truth values to the sentence letters A, B, and
-C, according to the composition of functions indicated in the
-formula&rsquo;s propositional structure. One can check that this
-formula takes the value <strong>F</strong> precisely when each of A,
-B, and C is assigned <strong>T</strong> and takes the value
-<strong>T</strong> otherwise. Under this interpretation, one can
-define</p>
+
+const example_text = `<p>
+The formal language of propositional logic consists of
+&ldquo;atomic&rdquo; propositional variables, \\(p_1\\), \\(p_2\\),
+\\(p_3\\), &hellip;, and propositional connectives, \\(c_1^1\\),
+\\(c_2^1\\), \\(c_3^1\\), &hellip;, \\(c_1^2\\), \\(c_2^2\\), \\(c_3^2\\),
+&hellip;, \\(c_1^3\\), &hellip;. The expressions&rsquo; subscripts are
+used to distinguish them from one another; the fact that we use
+natural numbers indicates the typical convention that the vocabulary
+be countable. The propositional connectives&rsquo; superscripts
+indicate their &ldquo;arity&rdquo;, i.e., the number of propositions
+that they operate on in order to create a new proposition. The
+formulas of propositional logic are defined recursively by</p>
 
 <ol>
 
 <li>
 
 <p>
-A is a <strong>classical propositional validity</strong> if it
-evaluates as <strong>T</strong> on every possible assignment of values
-to its atomic propositional variables;</p></li>
+Atomic propositional variables are formulas.</p></li>
 
 <li>
 
 <p>
-A is <strong>classically satisfiable</strong> if it evaluates as
-<strong>T</strong> on at least one possible assignment of values to
-its atomic propositional variables (and is <strong>classically
-unsatisfiable</strong> otherwise);</p></li>
-
-<li>
-
-<p>
-A is a <strong>classical propositional consequence</strong> of B if on
-no assignment of values to the atoms that occur in A and B on which B,
-evaluates as <strong>T</strong> does A evaluate as
-<strong>F</strong>;</p></li>
-
-<li>
-
-<p>
-A is a <strong>classical propositional equivalent</strong> of B if A
-and B evaluate as <strong>T</strong> on precisely the same assignments
-of values to atoms.</p></li>
+If \\(c_n^m\\) is a propositional connective, and \\(\\langle\\)A, B, C,
+&hellip;\\(\\rangle\\) is a sequence of <i>m</i>, possibly but not
+necessarily atomic, possibly but not necessarily distinct, formulas,
+then the result of applying \\(c_n^m\\) to \\(\\langle\\)A, B, C,
+&hellip;\\(\\rangle\\) is a formula.</p></li>
 </ol>
 
 <p>
-In this way, the language of propositional logic restricted to the
-connectives \\(\\neg\\), \\(\\vee\\), and \\(\\wedge\\) corresponds with the
-formulas of the familiar two element Boolean algebra of
-complementation, union, and intersection. The familiar Boolean laws
-of</p>
+The result of applying \\(c_n^m\\) to \\(\\langle\\)A, B, C,
+&hellip;\\(\\rangle\\) is customarily written in functional notation:
+\\(c_n^m\\)(A, B, C, &hellip;). Examples of formulas are</p>
 
 <ul>
 
-<li>
+<li id="formula1">
 
 <p>
-<strong>interchange</strong>:
-<br />
-If A and B are equivalent, and A occurs as a subformula of \\(\\rC_1\\),
-then the result of replacing an occurrence of A in \\(\\rC_1\\) with B is
-a formula \\(\\rC_2\\) that is equivalent to \\(\\rC_1\\).</p></li>
+\\(p_4\\)</p></li>
 
-<li>
+<li id="formula2">
 
 <p>
-<strong>substitution</strong>:
-<br />
-If A and \\(\\rB_1\\) and \\(\\rC_1\\) are any formulas whatsoever, then the
-result of replacing <em>each</em> occurrence of the propositional
-variable \\(p\\) in \\(\\rB_1\\) and \\(\\rC_1\\) with A are formulas
-\\(\\rB_2\\) and \\(\\rC_2\\) with the properties: \\(\\rB_2\\) is valid if
-\\(\\rB_1\\) is; \\(\\rB_2\\) is unsatisfiable if \\(\\rB_1\\) is; \\(\\rB_2\\) is
-a consequence of \\(\\rC_2\\) if \\(\\rB_1\\) is a consequence of \\(\\rC_1\\);
-\\(\\rB_2\\) and \\(\\rC_2\\) are equivalent if \\(\\rB_1\\) and \\(\\rC_1\\)
-are.</p></li>
+\\(c_1^2(p_7, p_3)\\)</p></li>
 
-<li>
+<li id="formula3">
 
 <p>
-<strong>complementation</strong>:
-<br />
-\\(\\rA\\vee\\neg\\rA\\) is a classical validity (called the &ldquo;law of
-excluded middle&rdquo; (<span class="sc">lem</span>) in propositional
-logic).</p></li>
+\\(c_2^2(c_1^1(p_1), c_1^1(c_1^2(p_2, p_3)))\\)</p></li>
 
-<li>
+<li id="formula4">
 
 <p>
-<strong>double complementation</strong>:
-<br />
-\\(\\neg\\neg\\rA\\) is equivalent to A.</p></li>
-
-<li>
-
-<p>
-<strong>commutativity</strong>:
-<br />
-\\(\\rA\\wedge\\rB\\) is equivalent to \\(\\rB\\wedge\\rA\\), and \\(\\rA\\vee\\rB\\)
-is equivalent to \\(\\rB\\vee\\rA\\).</p></li>
-
-<li>
-
-<p>
-<strong>associativity</strong>:
-<br />
-\\((\\rA\\wedge\\rB)\\wedge\\rC\\) is equivalent to \\(\\rA\\wedge
-(\\rB\\wedge\\rC)\\), and \\((\\rA\\vee\\rB)\\vee\\rC\\) is equivalent to
-\\(\\rA\\vee (\\rB\\vee\\rC)\\).</p></li>
-
-<li>
-
-<p>
-<strong>distribution</strong>:
-<br />
-\\(\\rA\\vee (\\rB_1\\wedge\\rB_2\\wedge \\ldots \\wedge\\rB_n)\\) is equivalent
-to \\((\\rA\\vee\\rB_1)\\wedge (\\rA\\vee\\rB_2)\\wedge \\ldots \\wedge
-(\\rA\\vee\\rB_n)\\) and
-<br />
-\\(\\rA\\wedge (\\rB_1\\vee\\rB_2\\vee \\ldots \\vee\\rB_n)\\) is equivalent to
-\\((\\rA\\wedge\\rB_1)\\vee (\\rA\\wedge\\rB_2)\\vee \\ldots \\vee
-(\\rA\\wedge\\rB_n)\\).</p></li>
-
-<li>
-
-<p>
-<strong>De Morgan equivalence</strong>:
-<br />
-\\(\\neg(\\rB_1\\wedge\\rB_2\\wedge \\ldots \\wedge\\rB_n)\\) is equivalent to
-\\(\\neg\\rB_1\\vee\\neg\\rB_2\\vee \\ldots \\vee\\neg\\rB_n\\) and
-<br />
-\\(\\neg(\\rB_1\\vee\\rB_2\\vee \\ldots \\vee\\rB_n)\\) is equivalent to
-\\(\\neg\\rB_1\\wedge\\neg\\rB_2\\wedge \\ldots \\wedge\\neg\\rB_n\\).</p></li>
+\\(c_5^3(p_2, c_3^2(c_4^1(c_6^2(p_3, p_3)), p_5),
+c_9^1(p_2))\\)</p></li>
 </ul>
 
 <p>
-therefore apply to this language of &ldquo;Boolean propositional
-formulas&rdquo;.</p>`;
+This recursive definition of the formulas of propositional logic
+justifies the use of the label &ldquo;atomic&rdquo; for the
+propositional variables: Every formula is built up stepwise from atoms
+through a finite application of propositional connectives. It can be
+helpful to think of the connectives as &ldquo;propositional
+functions&rdquo; that take propositions (denoted by formulas) as input
+and return propositions as output. The space of propositions is then
+given as the free algebra on the atomic formulas generated by these
+functions, and the specification of a proposition is given by the
+standard &ldquo;composition of functions&rdquo; notation. This
+terminology is not common, however, because the expression
+&ldquo;propositional function&rdquo; has a quite different use of high
+currency (see the entry on
+ <a href="../russell/">Bertrand Russell</a>).</p>`;
 
-processTex(
-  stripHTMLTags(
-    // htmlListToTextList(
-      normaliseWhitespace(
-        normaliseText(
-          example_text
-        )
-      )
-    // )
-  )
-).then(result => {
-  const normalised = normaliseWhitespace(result, true);
-  fs.writeFileSync('./example_output.txt', normalised);
-  console.log("Processed text saved to example_output.txt");
-}).catch(err => {
-  console.error("Error processing text:", err);
-});
+(async () => {
+  const processed = await preprocessText(example_text);
+  fs.writeFileSync('./debug_processed_example.txt', processed);
+})();
