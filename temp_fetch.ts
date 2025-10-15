@@ -233,9 +233,9 @@ function normaliseWhitespace(text: string, keepNewLines = false): string {
 }
 
 function stripHTMLTags(html: string): string {
-  const PRESERVE_TAGS = new Set(['table', 'thead', 'tbody', 'tr', 'td', 'th', 'figure', 'figcaption', 'pre']);
+  const PRESERVE_TAGS = new Set(['table', 'thead', 'tbody', 'tr', 'td', 'th', 'figure', 'figcaption']);
   const REMOVE_WITH_CONTENT = new Set(['script', 'style', 'iframe', 'noscript']);
-  const PARAGRAPH_TAGS = new Set(['p', 'div', 'blockquote', 'li']);
+  const PARAGRAPH_TAGS = new Set(['p', 'div', 'blockquote', 'li', 'pre']);
 
   let text = html;
 
