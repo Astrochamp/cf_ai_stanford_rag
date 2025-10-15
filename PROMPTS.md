@@ -11,3 +11,8 @@ And ordered lists should be converted to the appropriate format, e.g.
 
 Pay attention to `reversed`, `start`, and `type` attributes for `ol` elements. The text lists should be enclosed in <pre> tags. The rest of the HTML should remain unchanged.
 ```
+
+
+```
+Update the code to handle nested lists (as in the example_text) properly
+```
