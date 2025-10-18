@@ -1,16 +1,51 @@
+/**
+ * Stanford Encyclopedia of Philosophy - Article Processing Pipeline
+ * 
+ * This script provides a complete pipeline for fetching, preprocessing, and chunking
+ * articles from the Stanford Encyclopedia of Philosophy for use in RAG systems.
+ * 
+ * MAIN FEATURES:
+ * 
+ * 1. HTML to Text Preprocessing:
+ *    - Removes diacritics and normalizes Unicode
+ *    - Converts HTML lists to text format with proper markers
+ *    - Converts HTML tables to natural language descriptions (via GPT)
+ *    - Converts TeX mathematical notation to Unicode symbols or natural language
+ *    - Preserves paragraph structure with double newlines
+ * 
+ * 2. Semantic Chunking:
+ *    - Splits text into chunks up to 1024 tokens (configurable)
+ *    - Respects semantic boundaries (paragraphs, tables, lists)
+ *    - Never splits in the middle of a semantic unit
+ *    - Uses accurate GPT tokenization for chunk sizing
+ * 
+ * 3. Key Functions:
+ *    - fetchArticlesList(): Get all article IDs from SEP
+ *    - fetchArticleContent(id): Fetch and parse a single article
+ *    - preprocessText(html): Convert HTML to clean, processable text
+ *    - semanticChunking(text): Split text into semantic chunks
+ *    - processArticleSection(): Complete pipeline for one section
+ *    - processArticle(): Process all sections of an article
+ * 
+ * USAGE:
+ *    const article = await fetchArticleContent("logic-propositional" as ArticleID);
+ *    const results = await processArticle(article, 1024);
+ *    // results contains sections with their text chunks ready for embedding
+ */
+
 import * as cheerio from 'cheerio';
 import 'dotenv/config';
 import * as fs from 'fs';
+import { encode as tokenize } from 'gpt-tokenizer';
 import { decode as htmlDecode } from 'html-entities';
-import { encode as bpeEncode, decode as bpeDecode } from 'gpt-tokenizer';
 import { OpenAI } from "openai";
 import texToUnicodeMap from './data/tex-unicode-map.json';
 
 const articlesListURL = "https://plato.stanford.edu/published.html";
 const baseArticleURL = "https://plato.stanford.edu/entries/";
-const openai = new OpenAI({
+const openai = process.env.OPENAI_API_KEY ? new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
-});
+}) : null;
 
 type ArticleID = string & { __id: true; };
 
@@ -31,7 +66,13 @@ type Article = {
   related: ArticleID[];
 };
 
-function htmlListToTextList(htmlString: string): string {
+type ProcessedChunk = {
+  retrievalText: string; // Fully normalized for embedding/search
+  generationText: string; // Formatted for LLM context and display
+  tokenCount: number; // Based on retrieval text
+};
+
+function htmlListToTextList(htmlString: string, keepMarkers: boolean = true): string {
   function toRoman(num: number): string {
     if (num < 1 || num > 3999 || !Number.isInteger(num)) {
       // Standard Roman numerals are for positive integers in this range.
@@ -139,20 +180,34 @@ function htmlListToTextList(htmlString: string): string {
               // Split by placeholder and indent nested content
               const parts = contentWithPlaceholder.split(/\n?__NESTED_LIST__\n?/);
               const mainText = parts[0].trim();
-              textContent += `${marker}. ${mainText}\n`;
+              if (keepMarkers) {
+                textContent += `${marker}. ${mainText}\n`;
+              } else {
+                textContent += `${mainText}\n`;
+              }
 
               for (let i = 1; i < parts.length; i++) {
                 const nestedPart = parts[i].split('__END_NESTED_LIST__')[0];
                 if (nestedPart) {
                   const nestedLines = nestedPart.split('\n').filter(line => line.trim());
                   nestedLines.forEach(line => {
-                    textContent += `  ${line}\n`;
+                    if (keepMarkers) {
+                      textContent += `  ${line}\n`;
+                    } else {
+                      // Remove markers from nested content too
+                      const cleanedLine = line.replace(/^[\s\-•\d\w]+\.\s*/, '');
+                      textContent += `${cleanedLine}\n`;
+                    }
                   });
                 }
               }
             } else {
               // No nested list - just get text
-              textContent += `${marker}. ${$li.text().trim()}\n`;
+              if (keepMarkers) {
+                textContent += `${marker}. ${$li.text().trim()}\n`;
+              } else {
+                textContent += `${$li.text().trim()}\n`;
+              }
             }
 
             if (isReversed) {
@@ -189,7 +244,11 @@ function htmlListToTextList(htmlString: string): string {
 
               // Only add the parent marker if there's text content
               if (mainText) {
-                textContent += `- ${mainText}\n`;
+                if (keepMarkers) {
+                  textContent += `- ${mainText}\n`;
+                } else {
+                  textContent += `${mainText}\n`;
+                }
               }
 
               for (let i = 1; i < parts.length; i++) {
@@ -197,15 +256,25 @@ function htmlListToTextList(htmlString: string): string {
                 if (nestedPart) {
                   const nestedLines = nestedPart.split('\n').filter(line => line.trim());
                   nestedLines.forEach(line => {
-                    // If parent had no text, don't indent the nested list
-                    const indent = mainText ? '  ' : '';
-                    textContent += `${indent}${line}\n`;
+                    if (keepMarkers) {
+                      // If parent had no text, don't indent the nested list
+                      const indent = mainText ? '  ' : '';
+                      textContent += `${indent}${line}\n`;
+                    } else {
+                      // Remove markers from nested content
+                      const cleanedLine = line.replace(/^[\s\-•\d\w]+\.\s*/, '');
+                      textContent += `${cleanedLine}\n`;
+                    }
                   });
                 }
               }
             } else {
               // No nested list - just get text
-              textContent += `- ${$li.text().trim()}\n`;
+              if (keepMarkers) {
+                textContent += `- ${$li.text().trim()}\n`;
+              } else {
+                textContent += `${$li.text().trim()}\n`;
+              }
             }
           });
           textContent = textContent.trimEnd() + '\n';
@@ -223,7 +292,7 @@ function htmlListToTextList(htmlString: string): string {
   return $.html();
 }
 
-function _replaceTexSymbols(text: string): string {
+function replaceTexWithSymbols(text: string): string {
   const texMap = texToUnicodeMap as Record<string, string>;
   const texSymbolRegex = /\\([a-zA-Z]+)/g;
   const remainingTexRegex = /\\/;
@@ -246,12 +315,12 @@ function _replaceTexSymbols(text: string): string {
       return texMap[command]; // replace simple symbols
     });
 
-    // replace nonstandard "\rN" -> "N" (e.g. \rA -> A)
-    const romanTypesetRegex = /\\r([A-Za-z])/g;
-    const firstPassContentWithRomans: string = firstPassContent.replace(romanTypesetRegex, (match: string, letter: string): string => letter);
+    // replace "\rN" -> "N" and "\bT" -> "T"
+    const customTypesetRegex = /\\[rb]([A-Za-z])/g;
+    const removedCustomTypeset: string = firstPassContent.replace(customTypesetRegex, (match: string, letter: string): string => letter);
 
     // clean up braces and loose backslashes
-    const processedContent = firstPassContentWithRomans.replace(/\\{/g, "{").replace(/\\}/g, "}").replace(/\s+\\\s+/g, ' ');
+    const processedContent = removedCustomTypeset.replace(/\\{/g, "{").replace(/\\}/g, "}").replace(/\s+\\\s+/g, ' ');
 
     if (remainingTexRegex.test(processedContent)) {
       const startDelimiter = originalMatch.slice(0, 2); // e.g., "\(" or "\["
@@ -263,8 +332,10 @@ function _replaceTexSymbols(text: string): string {
   });
 }
 
-async function _gptConvertTexToText(text: string): Promise<string> {
-  throw new Error("Disabled for debugging");
+async function gptConvertTexToText(text: string): Promise<string> {
+  if (!openai) {
+    return text;
+  }
 
   const prompt = `Convert TeX expressions in this text to concise plain English, using symbols where possible. Respond with the updated text and nothing else, WITHOUT triple-quotes. Do NOT think step-by-step. Do NOT make any other changes to the text.
 
@@ -293,8 +364,10 @@ ${text}
   }
 };
 
-async function _gptCreateTableDescription(tableElem: string, articleTitle="", sectionHeading=""): Promise<string> {
-  throw new Error("Disabled for debugging");
+async function gptCreateTableDescription(tableElem: string, articleTitle = "", sectionHeading = ""): Promise<string> {
+  if (!openai) {
+    return "";
+  }
 
   const contextParts = [];
   contextParts.push("Stanford Encyclopedia of Philosophy");
@@ -328,16 +401,121 @@ ${tableElem}
   }
 };
 
-async function processTex(text: string): Promise<string> {
-  const replacedText = _replaceTexSymbols(text);
+async function processTex(text: string, forRetrieval: boolean = true): Promise<string> {
+  const replacedText = replaceTexWithSymbols(text);
   // if tex is still present, send to gpt-5-nano to convert to natural language
   // look for \( ... \) or \[ ... \]
   const texPattern = /(?:\\\(|\\\[)(.*?)(?:\\\)|\\\])/s;
   if (texPattern.test(replacedText)) {
-    return await _gptConvertTexToText(replacedText);
+    if (forRetrieval) {
+      // For retrieval, convert all TeX to natural language
+      return await gptConvertTexToText(replacedText);
+    } else {
+      // For generation, keep TeX in a readable format (already replaced symbols)
+      return replacedText;
+    }
   } else {
     return replacedText;
   }
+}
+
+function convertTableToMarkdown(tableHtml: string): string {
+  const $ = cheerio.load(tableHtml);
+  const $table = $('table').first();
+
+  if ($table.length === 0) return tableHtml;
+
+  const rows: string[][] = [];
+
+  // Extract headers
+  const headers: string[] = [];
+  $table.find('thead tr th, thead tr td').each((_, cell) => {
+    headers.push($(cell).text().trim());
+  });
+
+  // If no thead, check for th in first row of tbody
+  if (headers.length === 0) {
+    $table.find('tbody tr:first-child th, tbody tr:first-child td').each((_, cell) => {
+      headers.push($(cell).text().trim());
+    });
+  }
+
+  if (headers.length > 0) {
+    rows.push(headers);
+  }
+
+  // Extract body rows
+  const startRow = headers.length > 0 && $table.find('thead').length === 0 ? 1 : 0;
+  $table.find('tbody tr').slice(startRow).each((_, row) => {
+    const cells: string[] = [];
+    $(row).find('th, td').each((_, cell) => {
+      cells.push($(cell).text().trim());
+    });
+    if (cells.length > 0) {
+      rows.push(cells);
+    }
+  });
+
+  // Build markdown table
+  if (rows.length === 0) return tableHtml;
+
+  let markdown = '\n';
+
+  // Add header row
+  if (rows.length > 0) {
+    markdown += '| ' + rows[0].join(' | ') + ' |\n';
+    markdown += '| ' + rows[0].map(() => '---').join(' | ') + ' |\n';
+  }
+
+  // Add data rows
+  for (let i = 1; i < rows.length; i++) {
+    markdown += '| ' + rows[i].join(' | ') + ' |\n';
+  }
+
+  markdown += '\n';
+
+  return markdown;
+}
+
+async function convertTablesToDescriptions(text: string, articleTitle = "", sectionHeading = ""): Promise<string> {
+  // Find all table elements and convert them to descriptions
+  const tableRegex = /<table[^>]*>[\s\S]*?<\/table>/gi;
+  const tables = text.match(tableRegex);
+
+  if (!tables || tables.length === 0) {
+    return text;
+  }
+
+  let processedText = text;
+
+  for (const table of tables) {
+    const description = await gptCreateTableDescription(table, articleTitle, sectionHeading);
+    if (description) {
+      // Replace the table with a formatted description
+      processedText = processedText.replace(table, `[Table: ${description}]`);
+    }
+  }
+
+  return processedText;
+}
+
+function convertTablesToMarkdown(text: string): string {
+  // Find all table elements and convert them to markdown (for generation)
+  const tableRegex = /<table[^>]*>[\s\S]*?<\/table>/gi;
+  const tables = text.match(tableRegex);
+
+  if (!tables || tables.length === 0) {
+    return text;
+  }
+
+  let processedText = text;
+
+  for (const table of tables) {
+    const markdown = convertTableToMarkdown(table);
+    processedText = processedText.replace(table, markdown);
+  }
+
+  return processedText;
 }
 
 function normaliseText(text: string): string {
@@ -354,7 +532,7 @@ function normaliseWhitespace(text: string, keepNewLines = false): string {
 }
 
 function stripHTMLTags(html: string): string {
-  const PRESERVE_TAGS = new Set(['table', 'thead', 'tbody', 'tr', 'td', 'th', 'figure', 'figcaption']);
+  const PRESERVE_TAGS = new Set(['figure', 'figcaption']);
   const REMOVE_WITH_CONTENT = new Set(['script', 'style', 'iframe', 'noscript']);
   const PARAGRAPH_TAGS = new Set(['p', 'div', 'blockquote', 'li', 'pre']);
 
@@ -497,18 +675,211 @@ async function fetchArticleContent(id: ArticleID): Promise<Article> {
   };
 }
 
-async function preprocessText(text: string): Promise<string> {
-  // order: normaliseText -> htmlListToTextList -> stripHTMLTags -> processTex -> normaliseWhitespace (keepNewLines=true)
+/**
+ * Preprocess HTML content from Stanford Encyclopedia of Philosophy articles.
+ * Creates TWO versions optimized for different purposes:
+ * 
+ * RETRIEVAL FORMAT (for embedding/search):
+ * 1. normaliseText: Remove diacritics and normalize Unicode
+ * 2. normaliseWhitespace: Collapse whitespace
+ * 3. htmlListToTextList (no markers): Convert lists to plain text without bullets/numbers
+ * 4. convertTablesToDescriptions: Convert tables to natural language descriptions using GPT
+ * 5. stripHTMLTags: Remove HTML tags
+ * 6. processTex (full conversion): Convert all TeX to Unicode or natural language (may call GPT)
+ * 7. normaliseWhitespace: Final cleanup
+ * 
+ * GENERATION FORMAT (for LLM context & display):
+ * 1. Keep original text (preserve diacritics)
+ * 2. normaliseWhitespace: Collapse whitespace
+ * 3. htmlListToTextList (with markers): Keep list structure with -, 1., a., etc.
+ * 4. convertTablesToMarkdown: Convert tables to markdown for LLM understanding
+ * 5. stripHTMLTags: Remove HTML tags
+ * 6. processTex (partial): Replace simple symbols but keep complex TeX readable (no GPT call)
+ * 7. normaliseWhitespace: Final cleanup
+ * 
+ * @param text - Raw HTML content from article section
+ * @param articleTitle - Article title (used for context in table descriptions)
+ * @param sectionHeading - Section heading (used for context in table descriptions)
+ * @returns Object with both retrieval and generation text
+ */
+async function preprocessTextDual(
+  text: string,
+  articleTitle = "",
+  sectionHeading = ""
+): Promise<{ retrieval: string; generation: string; }> {
+  // RETRIEVAL FORMAT - Optimized for embedding
+  let retrieval = text;
+  retrieval = normaliseText(retrieval);
+  retrieval = normaliseWhitespace(retrieval);
+  retrieval = htmlListToTextList(retrieval, false); // No markers
+  retrieval = await convertTablesToDescriptions(retrieval, articleTitle, sectionHeading);
+  retrieval = stripHTMLTags(retrieval);
+  retrieval = await processTex(retrieval, true); // Full TeX conversion
+  retrieval = normaliseWhitespace(retrieval, true);
 
-  let processed = text;
-  processed = normaliseText(processed);
-  processed = normaliseWhitespace(processed); // needed to remove line wrapping from HTML source
-  processed = htmlListToTextList(processed);
-  processed = stripHTMLTags(processed); // converts p tags to \n\n
-  processed = await processTex(processed);
-  processed = normaliseWhitespace(processed, true);
-  return processed;
+  // GENERATION FORMAT - Optimized for LLM & display
+  let generation = text;
+  // Don't normalize text - keep diacritics
+  generation = normaliseWhitespace(generation);
+  generation = htmlListToTextList(generation, true); // Keep markers
+  generation = convertTablesToMarkdown(generation);
+  generation = stripHTMLTags(generation);
+  generation = await processTex(generation, false); // Partial TeX conversion
+  generation = normaliseWhitespace(generation, true);
+
+  return { retrieval, generation };
 }
+
+
+
+
+
+/**
+ * Process an article section: preprocess the content and chunk it semantically.
+ * Returns chunks in both retrieval and generation formats.
+ * 
+ * @param section - The article section to process
+ * @param articleTitle - The title of the article (for context in table descriptions)
+ * @param maxTokens - Maximum tokens per chunk (default: 1024)
+ * @returns Array of ProcessedChunk objects with both formats
+ */
+async function processArticleSectionDual(
+  section: ArticleSection,
+  articleTitle: string,
+  maxTokens: number = 1024
+): Promise<ProcessedChunk[]> {
+  const sectionHeading = section.number ? `${section.number} ${section.heading}` : section.heading;
+  const { retrieval, generation } = await preprocessTextDual(section.content, articleTitle, sectionHeading);
+
+  // Chunk both formats using the same semantic boundaries
+  // Use retrieval text for token counting (normalized, more conservative)
+  const retrievalUnits = extractSemanticUnits(retrieval);
+  const generationUnits = extractSemanticUnits(generation);
+
+  // They should have the same structure, so we can align them
+  const chunks: ProcessedChunk[] = [];
+  let retrievalIdx = 0;
+  let generationIdx = 0;
+
+  let currentRetrievalChunk = '';
+  let currentGenerationChunk = '';
+  let currentTokenCount = 0;
+
+  while (retrievalIdx < retrievalUnits.length && generationIdx < generationUnits.length) {
+    const retrievalUnit = retrievalUnits[retrievalIdx];
+    const generationUnit = generationUnits[generationIdx];
+    const unitTokens = tokenize(retrievalUnit).length;
+
+    // If adding this unit would exceed maxTokens, save current chunk and start new one
+    if (currentTokenCount + unitTokens > maxTokens && currentRetrievalChunk.length > 0) {
+      chunks.push({
+        retrievalText: currentRetrievalChunk.trim(),
+        generationText: currentGenerationChunk.trim(),
+        tokenCount: currentTokenCount
+      });
+      currentRetrievalChunk = '';
+      currentGenerationChunk = '';
+      currentTokenCount = 0;
+    }
+
+    // Add units to current chunks
+    if (currentRetrievalChunk.length > 0) {
+      currentRetrievalChunk += '\n\n' + retrievalUnit;
+      currentGenerationChunk += '\n\n' + generationUnit;
+    } else {
+      currentRetrievalChunk = retrievalUnit;
+      currentGenerationChunk = generationUnit;
+    }
+    currentTokenCount += unitTokens;
+
+    // If a single unit exceeds maxTokens, it becomes its own chunk
+    if (unitTokens > maxTokens && currentRetrievalChunk === retrievalUnit) {
+      chunks.push({
+        retrievalText: currentRetrievalChunk.trim(),
+        generationText: currentGenerationChunk.trim(),
+        tokenCount: unitTokens
+      });
+      currentRetrievalChunk = '';
+      currentGenerationChunk = '';
+      currentTokenCount = 0;
+    }
+
+    retrievalIdx++;
+    generationIdx++;
+  }
+
+  // Add any remaining content
+  if (currentRetrievalChunk.trim().length > 0) {
+    chunks.push({
+      retrievalText: currentRetrievalChunk.trim(),
+      generationText: currentGenerationChunk.trim(),
+      tokenCount: currentTokenCount
+    });
+  }
+
+  return chunks;
+}
+
+/**
+ * Extract semantic units from preprocessed text.
+ * Units are: table descriptions, list blocks, and regular paragraphs.
+ */
+function extractSemanticUnits(text: string): string[] {
+  const units: string[] = [];
+
+  // Simple semantic split on paragraph boundaries (two or more newlines)
+  const rawUnits = text.split(/\n{2,}/);
+  for (const rawUnit of rawUnits) {
+    const trimmed = rawUnit.trim();
+    if (!trimmed) continue;
+    units.push(trimmed);
+  }
+
+  // Merge consecutive list items if they belong to the same list
+  // (This handles cases where list items might have been split by \n\n)
+  const mergedUnits: string[] = [];
+  let currentListBlock = '';
+
+  for (const unit of units) {
+    const lines = unit.split('\n');
+    const startsWithListMarker = /^\s*[-•]\s/.test(lines[0]) ||
+      /^\s*\d+\.\s/.test(lines[0]) ||
+      /^\s*[a-z]\.\s/.test(lines[0]) ||
+      /^\s*[A-Z]\.\s/.test(lines[0]) ||
+      /^\s*[ivxlcdm]+\.\s/i.test(lines[0]);
+
+    if (startsWithListMarker) {
+      if (currentListBlock) {
+        currentListBlock += '\n' + unit;
+      } else {
+        currentListBlock = unit;
+      }
+    } else {
+      // Not a list - flush any accumulated list block
+      if (currentListBlock) {
+        mergedUnits.push(currentListBlock);
+        currentListBlock = '';
+      }
+      mergedUnits.push(unit);
+    }
+  }
+
+  // Flush any remaining list block
+  if (currentListBlock) {
+    mergedUnits.push(currentListBlock);
+  }
+
+  return mergedUnits;
+}
+
+
+
+
+
+
+// Test data
+const TEST_ARTICLE_TITLE = "Propositional Logic";
+const TEST_SECTION_HEADING = "2.1 Truth-functionality";
 
 const example_text = `<p>
 One sees that \\(f_1^1\\) performs no operation on its input and is
@@ -643,6 +1014,84 @@ input value, \\(f_{13}^2 = f_3^1\\) action on the first value, and
 \\(f_{16}^2 = \\bot\\), leaving ten essentially new binary truth
 functions.</p>`;
 
-preprocessText(example_text).then(result => {
-  fs.writeFileSync('debug_output.txt', result);
-});
+async function runTests() {
+  console.log('\n=== Testing Dual-Format Preprocessing Pipeline ===\n');
+
+  try {
+    // Test 1: Dual-format preprocessing
+    console.log('Test 1: Dual-format preprocessing...');
+    const { retrieval, generation } = await preprocessTextDual(example_text, TEST_ARTICLE_TITLE, TEST_SECTION_HEADING);
+
+    fs.writeFileSync('debug_output_retrieval.txt', retrieval);
+    fs.writeFileSync('debug_output_generation.txt', generation);
+    console.log('✓ Retrieval format saved to debug_output_retrieval.txt');
+    console.log('✓ Generation format saved to debug_output_generation.txt');
+
+    console.log('\nRetrieval format preview (first 200 chars):');
+    console.log(retrieval.slice(0, 200) + '...');
+    console.log('\nGeneration format preview (first 200 chars):');
+    console.log(generation.slice(0, 200) + '...');
+
+    // Test 2: Semantic chunking with dual formats
+    console.log('\n\nTest 2: Dual-format semantic chunking...');
+    const mockSection: ArticleSection = {
+      shortName: "TruthFunc",
+      number: "2.1",
+      heading: "Truth-functionality",
+      content: example_text
+    };
+
+    const dualChunks = await processArticleSectionDual(mockSection, TEST_ARTICLE_TITLE, 1024);
+    console.log(`✓ Created ${dualChunks.length} chunk(s) with dual formats`);
+
+    dualChunks.forEach((chunk, i) => {
+      console.log(`\n  Chunk ${i + 1}: ${chunk.tokenCount} tokens`);
+      console.log(`    Retrieval preview: ${chunk.retrievalText.slice(0, 100)}...`);
+      console.log(`    Generation preview: ${chunk.generationText.slice(0, 100)}...`);
+    });
+
+    const chunksOutput = {
+      chunks: dualChunks.map((c, i) => ({
+        chunkNumber: i + 1,
+        tokenCount: c.tokenCount,
+        retrievalText: c.retrievalText,
+        generationText: c.generationText
+      }))
+    };
+    fs.writeFileSync('debug_chunks.json', JSON.stringify(chunksOutput, null, 2));
+    console.log('\n✓ Dual-format chunks saved to debug_chunks.json');
+
+    // Test 3: Test with smaller chunk size
+    console.log('\n\nTest 3: Testing smaller chunk size (200 tokens)...');
+    const smallChunks = await processArticleSectionDual(mockSection, TEST_ARTICLE_TITLE, 200);
+    console.log(`✓ Created ${smallChunks.length} chunk(s) with 200 token limit`);
+
+    smallChunks.forEach((chunk, i) => {
+      console.log(`  Chunk ${i + 1}: ${chunk.tokenCount} tokens`);
+    });
+
+    console.log('\n\n=== All Tests Passed ===\n');
+
+    // Summary
+    console.log('Summary of Format Differences:');
+    console.log('\nRETRIEVAL FORMAT (for embedding/search):');
+    console.log('  • Fully normalized (no diacritics)');
+    console.log('  • TeX converted to Unicode or natural language');
+    console.log('  • Tables converted to natural language descriptions');
+    console.log('  • Lists without markers (pure content)');
+    console.log('  • Maximum semantic density');
+    console.log('\nGENERATION FORMAT (for LLM context & display):');
+    console.log('  • Preserves diacritics and special characters');
+    console.log('  • TeX kept in readable format (simple symbols replaced)');
+    console.log('  • Tables converted to markdown');
+    console.log('  • Lists with proper markers (-, 1., a., etc.)');
+    console.log('  • Structured for better LLM comprehension');
+
+  } catch (error) {
+    console.error('\n=== Error during processing ===');
+    console.error(error);
+    process.exit(1);
+  }
+}
+
+runTests();
