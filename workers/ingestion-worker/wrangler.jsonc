@@ -4,25 +4,21 @@
  */
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "fetch-sep",
+  "name": "ingestion-worker",
   "main": "src/index.ts",
   "compatibility_date": "2025-10-11",
   "observability": {
     "enabled": true
   },
-  "r2_buckets": [
-    {
-      "binding": "R2",
-      "bucket_name": "sep-articles",
-    }
-  ],
+  "ai": {
+    "binding": "AI"
+  },
   "vectorize": [
     {
       "binding": "VECTORIZE",
       "index_name": "sep-index-1024-dp"
     }
   ],
-  "workers_dev": false
   /**
 	 * Smart Placement
 	 * Docs: https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
@@ -53,4 +49,9 @@
 	 * https://developers.cloudflare.com/workers/wrangler/configuration/#service-bindings
 	 */
   // "services": [{ "binding": "MY_SERVICE", "service": "my-service" }]
+  "triggers": {
+    "crons": [
+      "* * * * *"
+    ]
+  }
 }
