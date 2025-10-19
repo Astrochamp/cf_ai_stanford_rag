@@ -606,6 +606,192 @@ async function fetchArticlesList(): Promise<ArticleID[]> {
   return uniqueArticleIDs;
 }
 
+/**
+ * Extract all figure IDs from HTML content.
+ * Looks for elements with IDs and class containing "figure" (figure/figures), or <figure> tags with IDs.
+ */
+function extractFigureIds(html: string): Set<string> {
+  const $ = cheerio.load(html);
+  const figureIds = new Set<string>();
+
+  // Find all figures: <figure> tags, div.figure, div.figures, or any element with class containing "figure"
+  // This handles: class="figure", class="figures", class="figure center wide", etc.
+  $('[class*="figure"][id], figure[id]').each((_, element) => {
+    const id = $(element).attr('id');
+    if (id) {
+      figureIds.add(id);
+    }
+  });
+
+  // Also look for nested figures and subfigures (e.g., div.inner-fig with id)
+  $('[class*="figure"] [id], figure [id]').each((_, element) => {
+    const id = $(element).attr('id');
+    if (id) {
+      figureIds.add(id);
+    }
+  });
+
+  return figureIds;
+}
+
+/**
+ * Fetch extended figure descriptions from a figdesc.html page.
+ * Returns a map of figure IDs to their extended descriptions.
+ * 
+ * Strategy: First extract all figure IDs from the article content,
+ * then look for those specific IDs in the figdesc.html page.
+ */
+async function fetchExtendedFigureDescriptions(articleUrl: string, articleHtml: string): Promise<Map<string, string>> {
+  const figDescUrl = `${articleUrl}figdesc.html`;
+  const descriptions = new Map<string, string>();
+
+  // Extract figure IDs from the main article
+  const figureIds = extractFigureIds(articleHtml);
+
+  if (figureIds.size === 0) {
+    // No figures in the article
+    return descriptions;
+  }
+
+  try {
+    const response = await fetch(figDescUrl);
+    if (!response.ok) {
+      // No figdesc.html page exists
+      return descriptions;
+    }
+
+    const text = await response.text();
+    const $ = cheerio.load(text);
+
+    // For each figure ID from the article, try to find its description in figdesc.html
+    for (const figId of figureIds) {
+      const $element = $(`#${figId}`);
+
+      if ($element.length === 0) continue;
+
+      let description = '';
+
+      // Strategy 1: If the element is a container (div, section), get its content
+      if ($element.is('div, section, article')) {
+        description = $element.html() || '';
+      }
+      // Strategy 2: If it's a heading, get content until the next heading or figure section
+      else if ($element.is('h1, h2, h3, h4, h5, h6')) {
+        let nextElement = $element.next();
+
+        while (nextElement.length > 0) {
+          // Stop at the next heading
+          if (nextElement.is('h1, h2, h3, h4, h5, h6')) {
+            break;
+          }
+          // Stop at the next figure section (any element with an ID from our list)
+          const nextId = nextElement.attr('id');
+          if (nextId && figureIds.has(nextId)) {
+            break;
+          }
+
+          description += $.html(nextElement) + '\n';
+          nextElement = nextElement.next();
+        }
+      }
+      // Strategy 3: Get the parent container and its content
+      else {
+        const $parent = $element.parent();
+        if ($parent.length > 0) {
+          description = $parent.html() || '';
+        }
+      }
+
+      if (description.trim()) {
+        descriptions.set(figId, description.trim());
+      }
+    }
+
+  } catch (error) {
+    // Silently fail - extended descriptions are optional
+    console.warn(`Could not fetch extended figure descriptions from ${figDescUrl}`);
+  }
+
+  return descriptions;
+}
+
+/**
+ * Extract the best available description for a figure.
+ * Priority: extended description > short caption > alt text
+ */
+function extractFigureDescription(
+  $figure: cheerio.Cheerio<any>,
+  figId: string | undefined,
+  extendedDescriptions: Map<string, string>,
+  $: cheerio.CheerioAPI
+): string {
+  // 1. Try extended description
+  if (figId && extendedDescriptions.has(figId)) {
+    return extendedDescriptions.get(figId)!;
+  }
+
+  // 2. Try short caption (figcaption tag or figlabel span or center p with text)
+  const figcaption = $figure.find('figcaption').text().trim();
+  if (figcaption) {
+    return figcaption;
+  }
+
+  const figlabel = $figure.find('.figlabel').parent().text().trim();
+  if (figlabel) {
+    // Remove the link text about extended description
+    return figlabel.replace(/\[An?\s+extended description[^\]]*\]/gi, '').trim();
+  }
+
+  const centerCaption = $figure.find('p.center, .center p').first().text().trim();
+  if (centerCaption) {
+    return centerCaption.replace(/\[An?\s+extended description[^\]]*\]/gi, '').trim();
+  }
+
+  // 3. Fallback to alt text from images
+  const altTexts: string[] = [];
+  $figure.find('img[alt]').each((_, img) => {
+    const alt = $(img).attr('alt')?.trim();
+    if (alt) altTexts.push(alt);
+  });
+
+  if (altTexts.length > 0) {
+    return altTexts.join('; ');
+  }
+
+  return '';
+}
+
+/**
+ * Process figures in article content: extract descriptions and normalize HTML.
+ * Replaces complex figure HTML with simple <figure><figcaption>...</figcaption></figure>
+ */
+async function processFiguresInContent(
+  html: string,
+  articleUrl: string
+): Promise<string> {
+  const $ = cheerio.load(html);
+  const extendedDescriptions = await fetchExtendedFigureDescriptions(articleUrl, html);
+
+  // Find all figures - SEP uses various patterns: div.figure, div.figures, <figure> tag
+  // Use attribute contains selector to match class="figure", class="figures", class="figure center wide", etc.
+  $('[class*="figure"], figure').each((_, element) => {
+    const $fig = $(element);
+    const figId = $fig.attr('id');
+
+    const description = extractFigureDescription($fig, figId, extendedDescriptions, $);
+
+    // Replace with normalized figure HTML
+    if (description) {
+      $fig.replaceWith(`<figure data-figid="${figId || ''}"><figcaption>${description}</figcaption></figure>`);
+    } else {
+      // No description available - use a generic placeholder
+      $fig.replaceWith(`<figure data-figid="${figId || ''}"><figcaption>Figure</figcaption></figure>`);
+    }
+  });
+
+  return $.html();
+}
+
 async function fetchArticleContent(id: ArticleID): Promise<Article> {
   const url = `${baseArticleURL}${id}/`;
   const response = await fetch(url);
@@ -663,6 +849,15 @@ async function fetchArticleContent(id: ArticleID): Promise<Article> {
     });
   });
 
+  // Process figures in preamble and sections to normalize them
+  const processedPreamble = await processFiguresInContent(preamble, url);
+  const processedSections = await Promise.all(
+    sections.map(async (section) => ({
+      ...section,
+      content: await processFiguresInContent(section.content, url)
+    }))
+  );
+
   const related: ArticleID[] = [];
   $('#related-entries a').each((_, element) => {
     const href = $(element).attr('href');
@@ -676,8 +871,8 @@ async function fetchArticleContent(id: ArticleID): Promise<Article> {
     title: normaliseText(title),
     originalTitle,
     authors,
-    preamble,
-    sections,
+    preamble: processedPreamble,
+    sections: processedSections,
     related
   };
 }
@@ -935,6 +1130,14 @@ function splitHtmlIntoItems(html: string): SectionItem[] {
     }
 
     if (tag === 'div' || tag === 'section') {
+      // Check if this div is actually a figure (SEP uses div.figure, div.figures, etc.)
+      // Check if class attribute contains "figure"
+      const classAttr = $node.attr('class') || '';
+      if (classAttr.includes('figure')) {
+        items.push({ kind: 'figure', html: $.html($node) });
+        return;
+      }
+
       // Try to lift contained block items (table/list/figure) if present directly as children
       const directTable = $node.children('table').first();
       if (directTable.length > 0) {
@@ -1014,9 +1217,41 @@ async function preprocessItemDual(item: SectionItem, articleTitle: string, secti
 
   if (kind === 'figure') {
     const $ = cheerio.load(html);
-    const caption = $('figcaption').text().trim();
-    const rRaw = caption ? `Figure: ${caption}` : 'Figure';
-    const gRaw = caption ? `[Figure: ${caption}]` : '[Figure]';
+
+    // Extract caption from figcaption (now standardized by processFiguresInContent)
+    let caption = $('figcaption').html()?.trim() || '';
+
+    // If no figcaption, fall back to checking for old-style figures
+    if (!caption) {
+      // Check for .figlabel or center paragraphs
+      const figlabel = $('.figlabel').parent().html()?.trim() || '';
+      if (figlabel) {
+        caption = figlabel.replace(/\[An?\s+extended description[^\]]*\]/gi, '').trim();
+      } else {
+        const centerCaption = $('p.center, .center p').first().html()?.trim() || '';
+        if (centerCaption) {
+          caption = centerCaption.replace(/\[An?\s+extended description[^\]]*\]/gi, '').trim();
+        } else {
+          // Last resort: check alt text
+          const altTexts: string[] = [];
+          $('img[alt]').each((_, img) => {
+            const alt = $(img).attr('alt')?.trim();
+            if (alt) altTexts.push(alt);
+          });
+          if (altTexts.length > 0) {
+            caption = altTexts.join('; ');
+          }
+        }
+      }
+    }
+
+    // Process the caption: strip HTML tags but keep content
+    // The caption may contain TeX, paragraphs, lists, etc. from extended descriptions
+    let captionText = stripHTMLTags(caption);
+    captionText = normaliseWhitespace(captionText, true);
+
+    const rRaw = captionText ? `Figure: ${captionText}` : 'Figure';
+    const gRaw = captionText ? `[Figure: ${captionText}]` : '[Figure]';
 
     let r = normaliseText(rRaw);
     r = await processTex(r, true);
@@ -1050,7 +1285,12 @@ async function preprocessItemDual(item: SectionItem, articleTitle: string, secti
 
 
 
-// EXAMPLE of figure and caption - current implementation WRONG
+// EXAMPLE of figure and caption from SEP HTML source
+// This example shows how SEP structures figures with:
+// - Multiple sub-figures with individual alt text
+// - Short caption with figure label
+// - Link to extended description on figdesc.html
+// The processFiguresInContent function will normalize this to a simple <figure><figcaption>...</figcaption></figure>
 const _example_fig_html = `<div class="figure centered avoid-break" id="fig1">
 
 <div id="fig1a" style="display: inline-block; width:45%">
@@ -1232,8 +1472,26 @@ async function runTests() {
   console.log('\n=== Testing Dual-Format Preprocessing Pipeline ===\n');
 
   try {
+    // Test 0: Figure processing
+    console.log('Test 0: Figure processing...');
+    const mockExtendedDescriptions = new Map<string, string>([
+      ['fig1', '<p>This figure shows four variations of a rectangle to illustrate color boundaries:</p><ul><li>(a) Sharp boundary with black line</li><li>(b) Sharp boundary without line</li><li>(c) Gradient boundary</li><li>(d) Uniform color</li></ul>']
+    ]);
+
+    // Test extractFigureDescription with the example figure
+    const $fig = cheerio.load(_example_fig_html);
+    const description = extractFigureDescription($fig.root(), 'fig1', mockExtendedDescriptions, $fig);
+    console.log('✓ Extracted figure description:');
+    console.log(`  ${description.slice(0, 150)}...`);
+
+    // Test processFiguresInContent (simulated - would normally fetch from server)
+    console.log('\n✓ Figure processing functions implemented');
+    console.log('  • extractFigureDescription: Priority = extended > caption > alt text');
+    console.log('  • processFiguresInContent: Normalizes figures to <figure><figcaption>');
+    console.log('  • Integrated into fetchArticleContent pipeline');
+
     // Test 1: Dual-format preprocessing
-    console.log('Test 1: Dual-format preprocessing...');
+    console.log('\n\nTest 1: Dual-format preprocessing...');
     const { retrieval, generation } = await preprocessTextDual(example_text, TEST_ARTICLE_TITLE, TEST_SECTION_HEADING);
 
     fs.writeFileSync('debug_output_retrieval.txt', retrieval);

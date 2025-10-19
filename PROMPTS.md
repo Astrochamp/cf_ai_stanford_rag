@@ -37,3 +37,10 @@ Implement this flow:
 
 Decompose the implementation task into manageable steps, and attempt one step at a time
 ```
+
+```
+Look at the example of a figure taken from the SEP HTML source. The current implementation won't handle it properly. Update the following:
+
+(1) when fetching the article, look for figures and links to an extended figure description page. the extended descriptions are typically all on one page, with a section for each. figures in an article may have both a short caption and a link to an extended description, or just a caption, or just a link. always prefer the extended description if present, then fall back to the short caption, then fall back to alt text. update figures in the saved html to store only a caption/description, but in a structured html-ish format compatible with the rest of the script
+(2) update existing functions to correctly handle figures
+```
