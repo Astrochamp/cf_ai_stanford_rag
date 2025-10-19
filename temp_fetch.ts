@@ -397,6 +397,44 @@ async function callGPTAPI(prompt: string, fallbackText: string, logMessage: stri
   }
 }
 
+/**
+ * Batch process multiple GPT API calls in parallel.
+ * Returns results in the same order as inputs.
+ */
+async function batchGPTCalls<T>(
+  items: T[],
+  createPrompt: (item: T) => { prompt: string; fallback: string; },
+  logPrefix: string = "Processing"
+): Promise<string[]> {
+  if (!openai || items.length === 0) {
+    return items.map(item => createPrompt(item).fallback);
+  }
+
+  console.log(`  → ${logPrefix} ${items.length} items in parallel...`);
+
+  const promises = items.map(async (item, index) => {
+    const { prompt, fallback } = createPrompt(item);
+    try {
+      const response = await openai.responses.create({
+        model: "gpt-5-nano",
+        input: prompt,
+        text: {
+          verbosity: "low"
+        },
+        reasoning: {
+          effort: "minimal"
+        }
+      });
+      return response.output_text;
+    } catch (error) {
+      console.error(`Error in batch call ${index + 1}/${items.length}: ${error}`);
+      return fallback;
+    }
+  });
+
+  return Promise.all(promises);
+}
+
 async function gptConvertTexToText(text: string, articleTitle = "", sectionHeading = ""): Promise<string> {
   const contextParts = [];
   contextParts.push("Stanford Encyclopedia of Philosophy");
@@ -437,6 +475,60 @@ ${text}
 `;
   return callGPTAPI(prompt, text, 'Calling GPT to convert TeX to natural language');
 };
+
+/**
+ * Batch process multiple TeX conversions in parallel.
+ */
+async function batchConvertTexToText(
+  texts: string[],
+  articleTitle = "",
+  sectionHeading = ""
+): Promise<string[]> {
+  const contextParts = [];
+  contextParts.push("Stanford Encyclopedia of Philosophy");
+  if (articleTitle) contextParts.push(articleTitle);
+  if (sectionHeading) contextParts.push(sectionHeading);
+  const contextInfo = contextParts.join(" - ");
+
+  return batchGPTCalls(
+    texts,
+    (text) => ({
+      prompt: `# Task: Convert TeX to Natural Language
+
+You will receive a paragraph from a philosophical text. Your job is to find all TeX notation and rewrite it as a natural language phrase.
+
+**Instructions:**
+1.  **Convert TeX:** Replace expressions like \`\\forall\`, \`\\in\`, and \`$..$\` with plain English.
+2.  **Preserve Surrounding Text:** Do not alter any non-TeX words.
+
+**Output Format:**
+- The final text must contain **absolutely no TeX markup**.
+- Provide **only the converted paragraph**. Do not include reasoning, explanations, or any introductory text.
+- The output must be **raw plain text**, not wrapped in code blocks (\`\`\`), quotes, or other delimiters.
+
+---
+**Example 1:**
+* **Input:** The Barcan formula is typically expressed as \`\\forall x \\Box Fx \\rightarrow \\Box \\forall x Fx\`.
+* **Output:** The Barcan formula is typically expressed as for all x, it is necessary that Fx, which implies that it is necessary that for all x, Fx.
+
+**Example 2:**
+* **Input:** The axiom of separation allows us to form a subset \`Y = \\{x \\in Z \\mid \\phi(x)\\}\`.
+* **Output:** The axiom of separation allows us to form a subset Y which is the set of all x in Z such that phi(x) is true.
+---
+
+**CONVERT THE FOLLOWING:**
+
+**Context:** ${contextInfo}
+**Paragraph:**
+${text}
+
+**Converted Paragraph:**
+`,
+      fallback: text
+    }),
+    'Converting TeX to natural language for'
+  );
+}
 
 async function gptCreateTableDescription(tableElem: string, articleTitle = "", sectionHeading = ""): Promise<string> {
   const contextParts = [];
@@ -484,6 +576,66 @@ ${tableElem}
 `;
   return callGPTAPI(prompt, "", 'Calling GPT to generate table description');
 };
+
+/**
+ * Batch process multiple table descriptions in parallel.
+ */
+async function batchCreateTableDescriptions(
+  tables: string[],
+  articleTitle = "",
+  sectionHeading = ""
+): Promise<string[]> {
+  const contextParts = [];
+  contextParts.push("Stanford Encyclopedia of Philosophy");
+  if (articleTitle) contextParts.push(articleTitle);
+  if (sectionHeading) contextParts.push(sectionHeading);
+  const contextInfo = contextParts.join(" - ");
+
+  return batchGPTCalls(
+    tables,
+    (tableElem) => ({
+      prompt: `# Task: Summarize HTML Table
+
+Your task is to analyze the provided HTML \`<table>\` and generate a concise natural language summary. The summary should capture the table's main purpose, structure, and key information.
+
+**Instructions:**
+1.  **Summarize, Don't Transcribe:** Do not describe every row or cell. Identify the key patterns, relationships, or conclusions presented in the table.
+2.  **Translate TeX:** If the table contains TeX notation (e.g., \`\\forall\`, \`$..$\`), translate it into plain English as part of your summary.
+3.  **Concise & Clear:** The output must be a single, easy-to-read description.
+4.  **Plain Text Output:** Provide only the summary. Do not include any HTML, TeX, markdown, or explanatory preambles in your response.
+
+---
+**Example:**
+* **Input Table:**
+\`\`\`html
+<table>
+  <thead>
+    <tr><th>System</th><th>Characteristic Axiom</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>K</td><td>(None)</td><td>Base system for modal logic.</td></tr>
+    <tr><td>T</td><td>$\\Box A \\rightarrow A$</td><td>Adds the axiom of necessity.</td></tr>
+    <tr><td>S4</td><td>$\\Box A \\rightarrow \\Box\\Box A$</td><td>Builds on T, adds the axiom for transitivity.</td></tr>
+  </tbody>
+</table>
+\`\`\`
+* **Output Summary:**
+A table presenting three modal logic systems, showing how they are built by adding axioms. The base system K has no unique axiom. System T extends K by adding the axiom stating that if A is necessary, then A is true. System S4 further builds on T with an axiom for transitivity, stating that if A is necessary, then it is necessary that A is necessary.
+---
+
+**SUMMARIZE THE FOLLOWING TABLE:**
+
+**Context:** ${contextInfo}
+**Input Table:**
+${tableElem}
+
+**Summary:**
+`,
+      fallback: ""
+    }),
+    'Generating table descriptions for'
+  );
+}
 
 async function processTex(text: string, forRetrieval: boolean = true): Promise<string> {
   const replacedText = replaceTexWithSymbols(text);
@@ -1003,12 +1155,14 @@ async function processArticleSectionDual(
   // Itemize the section content into stable block-level items
   const items = splitHtmlIntoItems(section.content);
 
-  // Convert each item to dual formats (retrieval/generation)
+  // Convert all items to dual formats (retrieval/generation) in parallel
+  const dualResults = await batchPreprocessItemsDual(items, articleTitle, sectionHeading);
+
+  // Extract aligned retrieval and generation units
   const retrievalUnits: string[] = [];
   const generationUnits: string[] = [];
 
-  for (const item of items) {
-    const dual = await preprocessItemDual(item, articleTitle, sectionHeading);
+  for (const dual of dualResults) {
     const r = dual.retrieval.trim();
     const g = dual.generation.trim();
     if (r.length > 0 || g.length > 0) {
@@ -1301,6 +1455,191 @@ async function preprocessItemDual(item: SectionItem, articleTitle: string, secti
 
     return { retrieval: finalize(r), generation: finalize(g) };
   }
+}
+
+/**
+ * Batch preprocess multiple items in parallel with optimized GPT calls.
+ * This is significantly faster than processing items sequentially.
+ * 
+ * @param items - Array of section items to preprocess
+ * @param articleTitle - Title of the article (for table context)
+ * @param sectionHeading - Heading of the section (for table context)
+ * @returns Array of dual-format results in the same order as input items
+ */
+async function batchPreprocessItemsDual(
+  items: SectionItem[],
+  articleTitle: string,
+  sectionHeading: string
+): Promise<{ retrieval: string; generation: string; }[]> {
+  if (items.length === 0) {
+    return [];
+  }
+
+  // Helpers to normalize whitespace at the end for consistency
+  const finalize = (s: string) => {
+    return normaliseWhitespace(s, true);
+  };
+
+  // Phase 1: Prepare all items and identify what needs GPT processing
+  type PreparedItem = {
+    index: number;
+    kind: ItemKind;
+    retrieval: string;
+    generation: string;
+    needsRetrievalTexConversion: boolean;
+    needsGenerationTexConversion: boolean;
+  };
+
+  const prepared: PreparedItem[] = [];
+  const tablesToProcess: { index: number; html: string; }[] = [];
+
+  for (let i = 0; i < items.length; i++) {
+    const { kind, html } = items[i];
+
+    if (kind === 'list') {
+      let r = htmlListToTextList(html, false);
+      let g = htmlListToTextList(html, true);
+      r = stripHTMLTags(r);
+      g = stripHTMLTags(g);
+      r = normaliseText(r);
+
+      const replacedR = replaceTexWithSymbols(r);
+      const replacedG = replaceTexWithSymbols(g);
+
+      prepared.push({
+        index: i,
+        kind,
+        retrieval: replacedR,
+        generation: replacedG,
+        needsRetrievalTexConversion: TEX_PATTERN.test(replacedR),
+        needsGenerationTexConversion: false // generation keeps TeX symbols
+      });
+    } else if (kind === 'table') {
+      const $ = cheerio.load(html);
+      const $table = $('table').first();
+      const tableHtml = $table.length > 0 ? $.html($table) : html;
+      
+      tablesToProcess.push({ index: i, html: tableHtml });
+      
+      // Placeholder - will be filled after batch table processing
+      prepared.push({
+        index: i,
+        kind,
+        retrieval: '',
+        generation: '',
+        needsRetrievalTexConversion: false,
+        needsGenerationTexConversion: false
+      });
+    } else if (kind === 'figure') {
+      const $ = cheerio.load(html);
+      let caption = $('figcaption').html()?.trim() || '';
+
+      if (!caption) {
+        const figlabel = $('.figlabel').parent().html()?.trim() || '';
+        if (figlabel) {
+          caption = figlabel.replace(/\[An?\s+extended description[^\]]*\]/gi, '').trim();
+        } else {
+          const centerCaption = $('p.center, .center p').first().html()?.trim() || '';
+          if (centerCaption) {
+            caption = centerCaption.replace(/\[An?\s+extended description[^\]]*\]/gi, '').trim();
+          } else {
+            const altTexts: string[] = [];
+            $('img[alt]').each((_, img) => {
+              const alt = $(img).attr('alt')?.trim();
+              if (alt) altTexts.push(alt);
+            });
+            if (altTexts.length > 0) {
+              caption = altTexts.join('; ');
+            }
+          }
+        }
+      }
+
+      let captionText = stripHTMLTags(caption);
+      captionText = normaliseWhitespace(captionText, true);
+
+      const rRaw = captionText ? `Figure: ${captionText}` : 'Figure';
+      const gRaw = captionText ? `[Figure: ${captionText}]` : '[Figure]';
+
+      let r = normaliseText(rRaw);
+      const replacedR = replaceTexWithSymbols(r);
+      const replacedG = replaceTexWithSymbols(gRaw);
+
+      prepared.push({
+        index: i,
+        kind,
+        retrieval: replacedR,
+        generation: replacedG,
+        needsRetrievalTexConversion: TEX_PATTERN.test(replacedR),
+        needsGenerationTexConversion: false
+      });
+    } else {
+      // pre, paragraph, blockquote, other
+      let r = stripHTMLTags(html);
+      let g = r;
+      r = normaliseText(r);
+
+      const replacedR = replaceTexWithSymbols(r);
+      const replacedG = replaceTexWithSymbols(g);
+
+      prepared.push({
+        index: i,
+        kind,
+        retrieval: replacedR,
+        generation: replacedG,
+        needsRetrievalTexConversion: TEX_PATTERN.test(replacedR),
+        needsGenerationTexConversion: false
+      });
+    }
+  }
+
+  // Phase 2: Batch process all tables in parallel
+  if (tablesToProcess.length > 0) {
+    const tableHtmls = tablesToProcess.map(t => t.html);
+    const tableDescriptions = await batchCreateTableDescriptions(tableHtmls, articleTitle, sectionHeading);
+
+    for (let i = 0; i < tablesToProcess.length; i++) {
+      const { index } = tablesToProcess[i];
+      let rDesc = tableDescriptions[i];
+
+      if (!rDesc) {
+        const md = convertTableToMarkdown(tableHtmls[i]);
+        rDesc = stripHTMLTags(md).replace(/[|`]/g, '').trim();
+      }
+
+      const gMd = convertTableToMarkdown(tableHtmls[i]);
+
+      let r = normaliseText(rDesc);
+      const replacedR = replaceTexWithSymbols(r);
+      const replacedG = replaceTexWithSymbols(gMd);
+
+      prepared[index].retrieval = replacedR;
+      prepared[index].generation = replacedG;
+      prepared[index].needsRetrievalTexConversion = TEX_PATTERN.test(replacedR);
+      prepared[index].needsGenerationTexConversion = false;
+    }
+  }
+
+  // Phase 3: Batch process all TeX conversions in parallel
+  const texConversionsNeeded = prepared.filter(p => p.needsRetrievalTexConversion);
+  
+  if (texConversionsNeeded.length > 0) {
+    const texInputs = texConversionsNeeded.map(p => p.retrieval);
+    const texOutputs = await batchConvertTexToText(texInputs, articleTitle, sectionHeading);
+
+    for (let i = 0; i < texConversionsNeeded.length; i++) {
+      const preparedIndex = prepared.findIndex(p => p.index === texConversionsNeeded[i].index);
+      if (preparedIndex !== -1) {
+        prepared[preparedIndex].retrieval = texOutputs[i];
+      }
+    }
+  }
+
+  // Phase 4: Finalize and return results in original order
+  return prepared.map(p => ({
+    retrieval: finalize(p.retrieval),
+    generation: finalize(p.generation)
+  }));
 }
 
 // ============================================================================
