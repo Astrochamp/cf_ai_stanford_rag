@@ -18,19 +18,6 @@
  *    - Respects semantic boundaries (paragraphs, tables, lists)
  *    - Never splits in the middle of a semantic unit
  *    - Uses accurate GPT tokenization for chunk sizing
- * 
- * 3. Key Functions:
- *    - fetchArticlesList(): Get all article IDs from SEP
- *    - fetchArticleContent(id): Fetch and parse a single article
- *    - preprocessText(html): Convert HTML to clean, processable text
- *    - semanticChunking(text): Split text into semantic chunks
- *    - processArticleSection(): Complete pipeline for one section
- *    - processArticle(): Process all sections of an article
- * 
- * USAGE:
- *    const article = await fetchArticleContent("logic-propositional" as ArticleID);
- *    const results = await processArticle(article, 1024);
- *    // results contains sections with their text chunks ready for embedding
  */
 
 import * as cheerio from 'cheerio';
@@ -537,7 +524,16 @@ function normaliseText(text: string): string {
 
 function normaliseWhitespace(text: string, keepNewLines = false): string {
   if (keepNewLines) {
-    return text.replace(/[ \t]+/g, ' ').trim();
+    // First, collapse multiple newlines to double newlines (paragraph breaks)
+    // Then replace single newlines (line wraps within paragraphs) with spaces
+    // Finally collapse multiple spaces to single spaces
+    return text
+      .replace(/\n{3,}/g, '\n\n')  // Collapse 3+ newlines to 2 (paragraph breaks)
+      .replace(/\n\n/g, '___PARAGRAPH_BREAK___')  // Temporarily mark paragraph breaks
+      .replace(/\n/g, ' ')  // Replace single newlines with spaces
+      .replace(/___PARAGRAPH_BREAK___/g, '\n\n')  // Restore paragraph breaks
+      .replace(/[ \t]+/g, ' ')  // Collapse multiple spaces/tabs to single space
+      .trim();
   }
   return text.replace(/\s+/g, ' ').trim();
 }
@@ -882,65 +878,6 @@ async function fetchArticleContent(id: ArticleID): Promise<Article> {
 }
 
 /**
- * Preprocess HTML content from Stanford Encyclopedia of Philosophy articles.
- * Creates TWO versions optimized for different purposes:
- * 
- * RETRIEVAL FORMAT (for embedding/search):
- * 1. normaliseText: Remove diacritics and normalize Unicode
- * 2. normaliseWhitespace: Collapse whitespace
- * 3. htmlListToTextList (no markers): Convert lists to plain text without bullets/numbers
- * 4. convertTablesToDescriptions: Convert tables to natural language descriptions using GPT
- * 5. stripHTMLTags: Remove HTML tags
- * 6. processTex (full conversion): Convert all TeX to Unicode or natural language (may call GPT)
- * 7. normaliseWhitespace: Final cleanup
- * 
- * GENERATION FORMAT (for LLM context & display):
- * 1. Keep original text (preserve diacritics)
- * 2. normaliseWhitespace: Collapse whitespace
- * 3. htmlListToTextList (with markers): Keep list structure with -, 1., a., etc.
- * 4. convertTablesToMarkdown: Convert tables to markdown for LLM understanding
- * 5. stripHTMLTags: Remove HTML tags
- * 6. processTex (partial): Replace simple symbols but keep complex TeX readable (no GPT call)
- * 7. normaliseWhitespace: Final cleanup
- * 
- * @param text - Raw HTML content from article section
- * @param articleTitle - Article title (used for context in table descriptions)
- * @param sectionHeading - Section heading (used for context in table descriptions)
- * @returns Object with both retrieval and generation text
- */
-async function preprocessTextDual(
-  text: string,
-  articleTitle = "",
-  sectionHeading = ""
-): Promise<{ retrieval: string; generation: string; }> {
-  // RETRIEVAL FORMAT - Optimized for embedding
-  let retrieval = text;
-  retrieval = normaliseText(retrieval);
-  retrieval = normaliseWhitespace(retrieval);
-  retrieval = htmlListToTextList(retrieval, false); // No markers
-  retrieval = await convertTablesToDescriptions(retrieval, articleTitle, sectionHeading);
-  retrieval = stripHTMLTags(retrieval);
-  retrieval = await processTex(retrieval, true); // Full TeX conversion
-  retrieval = normaliseWhitespace(retrieval, true);
-
-  // GENERATION FORMAT - Optimized for LLM & display
-  let generation = text;
-  // Don't normalize text - keep diacritics
-  generation = normaliseWhitespace(generation);
-  generation = htmlListToTextList(generation, true); // Keep markers
-  generation = convertTablesToMarkdown(generation);
-  generation = stripHTMLTags(generation);
-  generation = await processTex(generation, false); // Partial TeX conversion
-  generation = normaliseWhitespace(generation, true);
-
-  return { retrieval, generation };
-}
-
-
-
-
-
-/**
  * Process an article section: preprocess the content and chunk it semantically.
  * Returns chunks in both retrieval and generation formats.
  * 
@@ -1027,58 +964,6 @@ async function processArticleSectionDual(
   }
 
   return chunks;
-}
-
-/**
- * Extract semantic units from preprocessed text.
- * Units are: table descriptions, list blocks, and regular paragraphs.
- */
-function extractSemanticUnits(text: string): string[] {
-  const units: string[] = [];
-
-  // Simple semantic split on paragraph boundaries (two or more newlines)
-  const rawUnits = text.split(/\n{2,}/);
-  for (const rawUnit of rawUnits) {
-    const trimmed = rawUnit.trim();
-    if (!trimmed) continue;
-    units.push(trimmed);
-  }
-
-  // Merge consecutive list items if they belong to the same list
-  // (This handles cases where list items might have been split by \n\n)
-  const mergedUnits: string[] = [];
-  let currentListBlock = '';
-
-  for (const unit of units) {
-    const lines = unit.split('\n');
-    const startsWithListMarker = /^\s*[-•]\s/.test(lines[0]) ||
-      /^\s*\d+\.\s/.test(lines[0]) ||
-      /^\s*[a-z]\.\s/.test(lines[0]) ||
-      /^\s*[A-Z]\.\s/.test(lines[0]) ||
-      /^\s*[ivxlcdm]+\.\s/i.test(lines[0]);
-
-    if (startsWithListMarker) {
-      if (currentListBlock) {
-        currentListBlock += '\n' + unit;
-      } else {
-        currentListBlock = unit;
-      }
-    } else {
-      // Not a list - flush any accumulated list block
-      if (currentListBlock) {
-        mergedUnits.push(currentListBlock);
-        currentListBlock = '';
-      }
-      mergedUnits.push(unit);
-    }
-  }
-
-  // Flush any remaining list block
-  if (currentListBlock) {
-    mergedUnits.push(currentListBlock);
-  }
-
-  return mergedUnits;
 }
 
 /**
@@ -1333,7 +1218,7 @@ async function testArticleProcessing(articleId: string) {
     console.log(`  Sections: ${article.sections.length}`);
     console.log(`  Related articles: ${article.related.length}`);
 
-    // Step 2: Process preamble
+    // Step 2: Process preamble (always keep as single chunk)
     console.log(`\n[2/4] Processing preamble...`);
     const preambleChunks = await processArticleSectionDual(
       {
@@ -1343,9 +1228,9 @@ async function testArticleProcessing(articleId: string) {
         content: article.preamble
       },
       article.title,
-      MAX_TOKENS_PER_CHUNK
+      Infinity // Use Infinity to ensure preamble is never split
     );
-    console.log(`✓ Preamble split into ${preambleChunks.length} chunk(s)`);
+    console.log(`✓ Preamble kept as single chunk (${preambleChunks[0]?.tokenCount || 0} tokens)`);
 
     // Step 3: Process all sections
     console.log(`\n[3/4] Processing ${article.sections.length} section(s)...`);
