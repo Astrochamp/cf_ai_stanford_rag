@@ -27,3 +27,13 @@ From each SEP article, I need to obtain chunks in two formats:
 
 Reflecting on the current pipeline, make changes to create these two formats. Think carefully about retrieval and generation - consider best practices for each, e.g. table source HTML vs natural-language description, presence or absence of text markers, TeX, etc. - anything relevant that should be different between the two formats
 ```
+
+```
+Implement this flow:
+
+1. split text by tag e.g. p, table, ul, ol, etc., thus creating a list of "items"
+2. process each item into both retrieval and generation formats - these are now your lists of semantic units
+3. chunk based on the retrieval format, without splitting units - apply same chunking to generation format
+
+Decompose the implementation task into manageable steps, and attempt one step at a time
+```

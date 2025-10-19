@@ -72,6 +72,13 @@ type ProcessedChunk = {
   tokenCount: number; // Based on retrieval text
 };
 
+// New: Item-based processing types
+type ItemKind = 'paragraph' | 'list' | 'table' | 'pre' | 'blockquote' | 'figure' | 'other';
+type SectionItem = {
+  kind: ItemKind;
+  html: string; // raw HTML for the item
+};
+
 function htmlListToTextList(htmlString: string, keepMarkers: boolean = true): string {
   function toRoman(num: number): string {
     if (num < 1 || num > 3999 || !Number.isInteger(num)) {
@@ -749,28 +756,36 @@ async function processArticleSectionDual(
   maxTokens: number = 1024
 ): Promise<ProcessedChunk[]> {
   const sectionHeading = section.number ? `${section.number} ${section.heading}` : section.heading;
-  const { retrieval, generation } = await preprocessTextDual(section.content, articleTitle, sectionHeading);
 
-  // Chunk both formats using the same semantic boundaries
-  // Use retrieval text for token counting (normalized, more conservative)
-  const retrievalUnits = extractSemanticUnits(retrieval);
-  const generationUnits = extractSemanticUnits(generation);
+  // Itemize the section content into stable block-level items
+  const items = splitHtmlIntoItems(section.content);
 
-  // They should have the same structure, so we can align them
+  // Convert each item to dual formats (retrieval/generation)
+  const retrievalUnits: string[] = [];
+  const generationUnits: string[] = [];
+
+  for (const item of items) {
+    const dual = await preprocessItemDual(item, articleTitle, sectionHeading);
+    const r = dual.retrieval.trim();
+    const g = dual.generation.trim();
+    if (r.length > 0 || g.length > 0) {
+      // Maintain alignment even if one side is empty; prefer skipping only if both are empty
+      retrievalUnits.push(r);
+      generationUnits.push(g);
+    }
+  }
+
+  // Greedy chunking driven by retrieval units; apply same boundaries to generation
   const chunks: ProcessedChunk[] = [];
-  let retrievalIdx = 0;
-  let generationIdx = 0;
-
   let currentRetrievalChunk = '';
   let currentGenerationChunk = '';
   let currentTokenCount = 0;
 
-  while (retrievalIdx < retrievalUnits.length && generationIdx < generationUnits.length) {
-    const retrievalUnit = retrievalUnits[retrievalIdx];
-    const generationUnit = generationUnits[generationIdx];
-    const unitTokens = tokenize(retrievalUnit).length;
+  for (let i = 0; i < retrievalUnits.length; i++) {
+    const rUnit = retrievalUnits[i];
+    const gUnit = generationUnits[i] ?? '';
+    const unitTokens = tokenize(rUnit).length;
 
-    // If adding this unit would exceed maxTokens, save current chunk and start new one
     if (currentTokenCount + unitTokens > maxTokens && currentRetrievalChunk.length > 0) {
       chunks.push({
         retrievalText: currentRetrievalChunk.trim(),
@@ -782,18 +797,17 @@ async function processArticleSectionDual(
       currentTokenCount = 0;
     }
 
-    // Add units to current chunks
     if (currentRetrievalChunk.length > 0) {
-      currentRetrievalChunk += '\n\n' + retrievalUnit;
-      currentGenerationChunk += '\n\n' + generationUnit;
+      currentRetrievalChunk += '\n\n' + rUnit;
+      currentGenerationChunk += '\n\n' + gUnit;
     } else {
-      currentRetrievalChunk = retrievalUnit;
-      currentGenerationChunk = generationUnit;
+      currentRetrievalChunk = rUnit;
+      currentGenerationChunk = gUnit;
     }
     currentTokenCount += unitTokens;
 
-    // If a single unit exceeds maxTokens, it becomes its own chunk
-    if (unitTokens > maxTokens && currentRetrievalChunk === retrievalUnit) {
+    if (unitTokens > maxTokens && currentRetrievalChunk === rUnit) {
+      // Oversized single unit -> its own chunk
       chunks.push({
         retrievalText: currentRetrievalChunk.trim(),
         generationText: currentGenerationChunk.trim(),
@@ -803,12 +817,8 @@ async function processArticleSectionDual(
       currentGenerationChunk = '';
       currentTokenCount = 0;
     }
-
-    retrievalIdx++;
-    generationIdx++;
   }
 
-  // Add any remaining content
   if (currentRetrievalChunk.trim().length > 0) {
     chunks.push({
       retrievalText: currentRetrievalChunk.trim(),
@@ -872,6 +882,210 @@ function extractSemanticUnits(text: string): string[] {
   return mergedUnits;
 }
 
+// === Item-based helpers ===
+
+function splitHtmlIntoItems(html: string): SectionItem[] {
+  const items: SectionItem[] = [];
+  // Wrap the fragment so we can reliably iterate top-level nodes
+  const $ = cheerio.load(`<div id="__root__">${html}</div>`);
+  const $root = $('#__root__');
+
+  $root.contents().each((_, node) => {
+    // Text node handling: turn significant text into a paragraph
+    if (node.type === 'text') {
+      const text = (node.data || '').trim();
+      if (text.length > 0) {
+        items.push({ kind: 'paragraph', html: `<p>${text}</p>` });
+      }
+      return;
+    }
+
+    if (node.type !== 'tag') {
+      return;
+    }
+
+    const tag = (node as any).name?.toLowerCase?.() as string | undefined;
+    if (!tag) return;
+
+    const $node = $(node as any);
+
+    if (tag === 'p') {
+      items.push({ kind: 'paragraph', html: $.html($node) });
+      return;
+    }
+    if (tag === 'ul' || tag === 'ol') {
+      items.push({ kind: 'list', html: $.html($node) });
+      return;
+    }
+    if (tag === 'table') {
+      items.push({ kind: 'table', html: $.html($node) });
+      return;
+    }
+    if (tag === 'pre') {
+      items.push({ kind: 'pre', html: $.html($node) });
+      return;
+    }
+    if (tag === 'blockquote') {
+      items.push({ kind: 'blockquote', html: $.html($node) });
+      return;
+    }
+    if (tag === 'figure') {
+      items.push({ kind: 'figure', html: $.html($node) });
+      return;
+    }
+
+    if (tag === 'div' || tag === 'section') {
+      // Try to lift contained block items (table/list/figure) if present directly as children
+      const directTable = $node.children('table').first();
+      if (directTable.length > 0) {
+        items.push({ kind: 'table', html: $.html(directTable) });
+        return;
+      }
+      const directList = $node.children('ul,ol').first();
+      if (directList.length > 0) {
+        items.push({ kind: 'list', html: $.html(directList) });
+        return;
+      }
+      const directFigure = $node.children('figure').first();
+      if (directFigure.length > 0) {
+        items.push({ kind: 'figure', html: $.html(directFigure) });
+        return;
+      }
+      // Fallback: treat as paragraph-ish container content
+      items.push({ kind: 'paragraph', html: $.html($node) });
+      return;
+    }
+
+    // Default case
+    items.push({ kind: 'other', html: $.html($node) });
+  });
+
+  return items;
+}
+
+async function preprocessItemDual(item: SectionItem, articleTitle: string, sectionHeading: string): Promise<{ retrieval: string; generation: string; }> {
+  const { kind, html } = item;
+
+  // Helpers to normalize whitespace at the end for consistency
+  const finalize = (s: string) => {
+    // Collapse whitespace but keep newlines
+    return normaliseWhitespace(s, true);
+  };
+
+  if (kind === 'list') {
+    // Retrieval: no markers; Generation: with markers
+    // Start from original HTML to preserve structure within the list conversion
+    let r = htmlListToTextList(html, false);
+    let g = htmlListToTextList(html, true);
+
+    r = stripHTMLTags(r);
+    g = stripHTMLTags(g);
+
+    r = normaliseText(r);
+    r = await processTex(r, true);
+    g = await processTex(g, false);
+
+    return { retrieval: finalize(r), generation: finalize(g) };
+  }
+
+  if (kind === 'table') {
+    // Extract the actual table HTML if wrapped
+    const $ = cheerio.load(html);
+    const $table = $('table').first();
+    const tableHtml = $table.length > 0 ? $.html($table) : html;
+
+    // Retrieval: GPT description (fallback to markdown -> plain text)
+    let rDesc = await gptCreateTableDescription(tableHtml, articleTitle, sectionHeading);
+    if (!rDesc) {
+      // Fallback: markdown then strip to text
+      const md = convertTableToMarkdown(tableHtml);
+      rDesc = stripHTMLTags(md).replace(/[|`]/g, '').trim();
+    }
+    // Generation: markdown table
+    const gMd = convertTableToMarkdown(tableHtml);
+
+    // Process TeX
+    let r = normaliseText(rDesc);
+    r = await processTex(r, true);
+    let g = await processTex(gMd, false);
+
+    return { retrieval: finalize(r), generation: finalize(g) };
+  }
+
+  if (kind === 'figure') {
+    const $ = cheerio.load(html);
+    const caption = $('figcaption').text().trim();
+    const rRaw = caption ? `Figure: ${caption}` : 'Figure';
+    const gRaw = caption ? `[Figure: ${caption}]` : '[Figure]';
+
+    let r = normaliseText(rRaw);
+    r = await processTex(r, true);
+    let g = await processTex(gRaw, false);
+
+    return { retrieval: finalize(r), generation: finalize(g) };
+  }
+
+  if (kind === 'pre') {
+    // Treat preformatted blocks as-is but strip tags; avoid losing structure
+    let r = stripHTMLTags(html);
+    let g = r; // identical content for generation
+    r = normaliseText(r);
+    r = await processTex(r, true);
+    g = await processTex(g, false);
+    return { retrieval: finalize(r), generation: finalize(g) };
+  }
+
+  // Paragraph, blockquote, and others fall back to generic text handling
+  {
+    let r = stripHTMLTags(html);
+    let g = r; // same textual content, different TeX/diacritics handling below
+
+    r = normaliseText(r);
+    r = await processTex(r, true);
+    g = await processTex(g, false);
+
+    return { retrieval: finalize(r), generation: finalize(g) };
+  }
+}
+
+
+
+// EXAMPLE of figure and caption - current implementation WRONG
+const _example_fig_html = `<div class="figure centered avoid-break" id="fig1">
+
+<div id="fig1a" style="display: inline-block; width:45%">
+<img alt="a rectangle one half blue and one half white with a solid black line between the two halves" src="figure1a.svg" style="width:2in" />
+
+<p class="center">
+(a)</p>
+</div>
+
+<div id="fig1c" style="display: inline-block; width:45%">
+<img alt="same rectangle with no black line between the two halves" src="figure1b.svg" style="width:2in" />
+
+<p class="center">
+(b)</p>
+</div>
+
+<div id="fig1b" style="display: inline-block; width:45%">
+<img alt="same rectangle but colors now in a gradient from blue at one end to white at the other" src="figure1c.svg" style="width:2in" />
+
+<p class="center">
+(c)</p>
+</div>
+
+<div id="fig1d" style="display: inline-block; width:45%">
+<img alt="same rectangle but now a solid light blue" src="figure1d.svg" style="width:2in" />
+
+<p class="center">
+(d)</p>
+</div>
+
+<p class="center">
+<span class="figlabel">Figure 1</span> [An
+ <a href="figdesc.html#fig1">extended description of figure 1</a>
+ is in the supplement.]</p>
+</div>`;
 
 
 
