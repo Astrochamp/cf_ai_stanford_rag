@@ -41,6 +41,11 @@
 
 import { WorkerEntrypoint } from 'cloudflare:workers';
 
+interface Env {
+  AI: Ai;
+  // Add other bindings as needed
+}
+
 interface EmbeddingResult {
   shape: number[];
   data: Float32Array[];
