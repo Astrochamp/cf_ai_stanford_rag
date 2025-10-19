@@ -44,3 +44,15 @@ Look at the example of a figure taken from the SEP HTML source. The current impl
 (1) when fetching the article, look for figures and links to an extended figure description page. the extended descriptions are typically all on one page, with a section for each. figures in an article may have both a short caption and a link to an extended description, or just a caption, or just a link. always prefer the extended description if present, then fall back to the short caption, then fall back to alt text. update figures in the saved html to store only a caption/description, but in a structured html-ish format compatible with the rest of the script
 (2) update existing functions to correctly handle figures
 ```
+
+```
+Read this script carefully. So far, it manages preprocessing and chunking as part of a RAG system for the SEP. The intended data pipeline is:
+
+1. fetch all articles (one-time) / fetch new or updated articles (ongoing, cron)
+2. vectorise chunks (dense & sparse)
+3. store vectors and chunk text + metadata
+
+Look closely at the script. Without changing any of the functionality, tidy up the code where possible to improve readability, maintainability, and performance (where applicable). Don't make unnecessary changes.
+
+Before you start making changes, clearly set out exactly what it is that you will modify, perhaps using todos. Stick to this list while making changes.
+```

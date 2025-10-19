@@ -34,6 +34,27 @@ const openai = process.env.OPENAI_API_KEY ? new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 }) : null;
 
+// ============================================================================
+// CONSTANTS & REGEX PATTERNS
+// ============================================================================
+
+const TEX_PATTERN = /(?:\\\(|\\\[)(.*?)(?:\\\)|\\\])/s;
+const TABLE_REGEX = /<table[^>]*>[\s\S]*?<\/table>/gi;
+const NESTED_LIST_PLACEHOLDER = '__NESTED_LIST__';
+const NESTED_LIST_END_PLACEHOLDER = '__END_NESTED_LIST__';
+
+const EXCLUDED_TEX_COMMANDS = new Set([
+  'sum', 'int', 'prod', 'lim', 'bigcup', 'bigcap', // operators
+  'frac', 'sqrt',                                  // fractions, roots
+  'hat', 'bar', 'vec', 'dot', 'tilde',             // accents
+  'mathbb', 'mathcal', 'mathbf', 'mathrm',         // fonts
+  'left', 'right', 'begin', 'end'                  // structural
+]);
+
+// ============================================================================
+// TYPE DEFINITIONS
+// ============================================================================
+
 type ArticleID = string & { __id: true; };
 
 type ArticleSection = {
@@ -66,44 +87,97 @@ type SectionItem = {
   html: string; // raw HTML for the item
 };
 
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * Mapping of Roman numerals to their integer values.
+ */
+const ROMAN_MAP: Record<string, number> = {
+  M: 1000, CM: 900, D: 500, CD: 400,
+  C: 100, XC: 90, L: 50, XL: 40,
+  X: 10, IX: 9, V: 5, IV: 4, I: 1
+};
+
+/**
+ * Convert a number to Roman numeral representation.
+ * Standard Roman numerals are for positive integers in the range 1-3999.
+ */
+function toRoman(num: number): string {
+  if (num < 1 || num > 3999 || !Number.isInteger(num)) {
+    return num.toString();
+  }
+
+  let roman = '';
+  let remaining = num;
+  for (const key in ROMAN_MAP) {
+    while (remaining >= ROMAN_MAP[key]) {
+      roman += key;
+      remaining -= ROMAN_MAP[key];
+    }
+  }
+  return roman;
+}
+
+/**
+ * Convert a number to alphabetic representation (1=A, 2=B, ..., 26=Z, 27=AA, etc.).
+ * Adjusts for 1-based indexing to 0-based for character codes.
+ */
+function toAlphabet(num: number): string {
+  if (num < 1 || !Number.isInteger(num)) {
+    return num.toString();
+  }
+  let result = '';
+  let tempNum = num;
+  while (tempNum > 0) {
+    const remainder = (tempNum - 1) % 26;
+    result = String.fromCharCode(65 + remainder) + result; // 65 is the char code for 'A'
+    tempNum = Math.floor((tempNum - 1) / 26);
+  }
+  return result;
+}
+
+/**
+ * Process nested list content by replacing placeholder markers with properly indented text.
+ */
+function processNestedListContent(
+  contentWithPlaceholder: string,
+  keepMarkers: boolean,
+  hasMainText: boolean
+): string {
+  const parts = contentWithPlaceholder.split(new RegExp(`\\n?${NESTED_LIST_PLACEHOLDER}\\n?`));
+  const mainText = parts[0].trim();
+  let result = '';
+
+  if (mainText && keepMarkers) {
+    // Main text will be handled by caller with marker
+  }
+
+  for (let i = 1; i < parts.length; i++) {
+    const nestedPart = parts[i].split(NESTED_LIST_END_PLACEHOLDER)[0];
+    if (nestedPart) {
+      const nestedLines = nestedPart.split('\n').filter(line => line.trim());
+      nestedLines.forEach(line => {
+        if (keepMarkers) {
+          const indent = hasMainText ? '  ' : '';
+          result += `${indent}${line}\n`;
+        } else {
+          const cleanedLine = line.replace(/^[\s\-•\d\w]+\.\s*/, '');
+          result += `${cleanedLine}\n`;
+        }
+      });
+    }
+  }
+
+  return result;
+}
+
+// ============================================================================
+// HTML LIST PROCESSING
+// ============================================================================
+
 function htmlListToTextList(htmlString: string, keepMarkers: boolean = true): string {
-  function toRoman(num: number): string {
-    if (num < 1 || num > 3999 || !Number.isInteger(num)) {
-      // Standard Roman numerals are for positive integers in this range.
-      return num.toString();
-    }
-
-    // Mapping of Roman numerals to their integer values.
-    const romanMap: { [key: string]: number; } = {
-      M: 1000, CM: 900, D: 500, CD: 400,
-      C: 100, XC: 90, L: 50, XL: 40,
-      X: 10, IX: 9, V: 5, IV: 4, I: 1
-    };
-
-    let roman = '';
-    for (const key in romanMap) {
-      while (num >= romanMap[key]) {
-        roman += key;
-        num -= romanMap[key];
-      }
-    }
-    return roman;
-  }
-
-  function toAlphabet(num: number): string {
-    if (num < 1 || !Number.isInteger(num)) {
-      return num.toString();
-    }
-    let result = '';
-    let tempNum = num;
-    while (tempNum > 0) {
-      // Adjust for 1-based indexing to 0-based for character codes.
-      const remainder = (tempNum - 1) % 26;
-      result = String.fromCharCode(65 + remainder) + result; // 65 is the char code for 'A'
-      tempNum = Math.floor((tempNum - 1) / 26);
-    }
-    return result;
-  }
 
   const $ = cheerio.load(htmlString);
 
@@ -167,34 +241,19 @@ function htmlListToTextList(htmlString: string, keepMarkers: boolean = true): st
             if ($nestedPre.length > 0) {
               // Has nested list - extract text before the <pre> and the <pre> content
               $nestedPre.each((_, pre) => {
-                $(pre).replaceWith('\n__NESTED_LIST__\n' + $(pre).text() + '__END_NESTED_LIST__\n');
+                $(pre).replaceWith(`\n${NESTED_LIST_PLACEHOLDER}\n` + $(pre).text() + `${NESTED_LIST_END_PLACEHOLDER}\n`);
               });
               const contentWithPlaceholder = $liContent.text().trim();
-
-              // Split by placeholder and indent nested content
-              const parts = contentWithPlaceholder.split(/\n?__NESTED_LIST__\n?/);
+              const parts = contentWithPlaceholder.split(new RegExp(`\\n?${NESTED_LIST_PLACEHOLDER}\\n?`));
               const mainText = parts[0].trim();
+
               if (keepMarkers) {
                 textContent += `${marker}. ${mainText}\n`;
               } else {
                 textContent += `${mainText}\n`;
               }
 
-              for (let i = 1; i < parts.length; i++) {
-                const nestedPart = parts[i].split('__END_NESTED_LIST__')[0];
-                if (nestedPart) {
-                  const nestedLines = nestedPart.split('\n').filter(line => line.trim());
-                  nestedLines.forEach(line => {
-                    if (keepMarkers) {
-                      textContent += `  ${line}\n`;
-                    } else {
-                      // Remove markers from nested content too
-                      const cleanedLine = line.replace(/^[\s\-•\d\w]+\.\s*/, '');
-                      textContent += `${cleanedLine}\n`;
-                    }
-                  });
-                }
-              }
+              textContent += processNestedListContent(contentWithPlaceholder, keepMarkers, true);
             } else {
               // No nested list - just get text
               if (keepMarkers) {
@@ -228,12 +287,10 @@ function htmlListToTextList(htmlString: string, keepMarkers: boolean = true): st
             if ($nestedPre.length > 0) {
               // Has nested list - extract text before the <pre> and the <pre> content
               $nestedPre.each((_, pre) => {
-                $(pre).replaceWith('\n__NESTED_LIST__\n' + $(pre).text() + '__END_NESTED_LIST__\n');
+                $(pre).replaceWith(`\n${NESTED_LIST_PLACEHOLDER}\n` + $(pre).text() + `${NESTED_LIST_END_PLACEHOLDER}\n`);
               });
               const contentWithPlaceholder = $liContent.text().trim();
-
-              // Split by placeholder and indent nested content
-              const parts = contentWithPlaceholder.split(/\n?__NESTED_LIST__\n?/);
+              const parts = contentWithPlaceholder.split(new RegExp(`\\n?${NESTED_LIST_PLACEHOLDER}\\n?`));
               const mainText = parts[0].trim();
 
               // Only add the parent marker if there's text content
@@ -245,23 +302,7 @@ function htmlListToTextList(htmlString: string, keepMarkers: boolean = true): st
                 }
               }
 
-              for (let i = 1; i < parts.length; i++) {
-                const nestedPart = parts[i].split('__END_NESTED_LIST__')[0];
-                if (nestedPart) {
-                  const nestedLines = nestedPart.split('\n').filter(line => line.trim());
-                  nestedLines.forEach(line => {
-                    if (keepMarkers) {
-                      // If parent had no text, don't indent the nested list
-                      const indent = mainText ? '  ' : '';
-                      textContent += `${indent}${line}\n`;
-                    } else {
-                      // Remove markers from nested content
-                      const cleanedLine = line.replace(/^[\s\-•\d\w]+\.\s*/, '');
-                      textContent += `${cleanedLine}\n`;
-                    }
-                  });
-                }
-              }
+              textContent += processNestedListContent(contentWithPlaceholder, keepMarkers, !!mainText);
             } else {
               // No nested list - just get text
               if (keepMarkers) {
@@ -286,24 +327,20 @@ function htmlListToTextList(htmlString: string, keepMarkers: boolean = true): st
   return $.html();
 }
 
+// ============================================================================
+// TEX & TEXT NORMALIZATION
+// ============================================================================
+
 function replaceTexWithSymbols(text: string): string {
   const texMap = texToUnicodeMap as Record<string, string>;
   const texSymbolRegex = /\\([a-zA-Z]+)/g;
   const remainingTexRegex = /\\/;
   const mathExpressionRegex = /(?:\\\(|\\\[)(.*?)(?:\\\)|\\\])/g;
 
-  const EXCLUDED_COMMANDS = new Set([
-    'sum', 'int', 'prod', 'lim', 'bigcup', 'bigcap', // operators
-    'frac', 'sqrt',                                  // fractions, roots
-    'hat', 'bar', 'vec', 'dot', 'tilde',             // accents
-    'mathbb', 'mathcal', 'mathbf', 'mathrm',         // fonts
-    'left', 'right', 'begin', 'end'                  // structural
-  ]);
-
   return text.replace(mathExpressionRegex, (originalMatch, content) => {
 
     const firstPassContent = content.replace(texSymbolRegex, (match: string, command: string) => {
-      if (EXCLUDED_COMMANDS.has(command) || !texMap[command]) {
+      if (EXCLUDED_TEX_COMMANDS.has(command) || !texMap[command]) {
         return match; // keep complex commands e.g \frac, \sum
       }
       return texMap[command]; // replace simple symbols
@@ -326,85 +363,131 @@ function replaceTexWithSymbols(text: string): string {
   });
 }
 
-async function gptConvertTexToText(text: string): Promise<string> {
+// ============================================================================
+// GPT API HELPERS
+// ============================================================================
+
+/**
+ * Call GPT API with a prompt and return the response text.
+ * Handles API errors gracefully by returning fallback text.
+ */
+async function callGPTAPI(prompt: string, fallbackText: string, logMessage: string): Promise<string> {
   if (!openai) {
-    return text;
+    return fallbackText;
   }
 
-  console.log('  → Calling GPT to convert TeX to natural language...');
+  console.log(`  → ${logMessage}...`);
 
-  const prompt = `Convert TeX expressions in this text to concise plain English, using symbols where possible. Respond with the updated text and nothing else, WITHOUT triple-quotes. Do NOT think step-by-step. Do NOT make any other changes to the text.
-
-Text:
-"""
-${text}
-"""
-`;
   try {
     const response = await openai.responses.create({
-      "model": "gpt-5-nano",
+      model: "gpt-5-nano",
       input: prompt,
       text: {
-        "verbosity": "low"
+        verbosity: "low"
       },
-      "reasoning": {
-        "effort": "minimal"
+      reasoning: {
+        effort: "minimal"
       }
     });
 
     return response.output_text;
   } catch (error) {
-    console.error("Error calling OpenAI API for TeX conversion:", error);
-    // Fall back to returning the original text if API fails
-    return text;
+    console.error(`Error calling OpenAI API: ${error}`);
+    return fallbackText;
   }
-};
+}
 
-async function gptCreateTableDescription(tableElem: string, articleTitle = "", sectionHeading = ""): Promise<string> {
-  if (!openai) {
-    return "";
-  }
-
+async function gptConvertTexToText(text: string, articleTitle = "", sectionHeading = ""): Promise<string> {
   const contextParts = [];
   contextParts.push("Stanford Encyclopedia of Philosophy");
   if (articleTitle) contextParts.push(articleTitle);
   if (sectionHeading) contextParts.push(sectionHeading);
   const contextInfo = contextParts.join(" - ");
 
-  console.log('  → Calling GPT to generate table description...');
+  const prompt = `# Task: Convert TeX to Natural Language
 
-  const prompt = `Write a concise natural language description of this HTML table. The table may contain TeX expressions. Respond with the description and nothing else, WITHOUT triple-quotes. Do NOT think step-by-step. Context: ${contextInfo}
+You will receive a paragraph from a philosophical text. Your job is to find all TeX notation and rewrite it as a natural language phrase.
 
-Table:
-"""
-${tableElem}
-"""
+**Instructions:**
+1.  **Convert TeX:** Replace expressions like \`\\forall\`, \`\\in\`, and \`$..$\` with plain English.
+2.  **Preserve Surrounding Text:** Do not alter any non-TeX words.
+
+**Output Format:**
+- The final text must contain **absolutely no TeX markup**.
+- Provide **only the converted paragraph**. Do not include reasoning, explanations, or any introductory text.
+- The output must be **raw plain text**, not wrapped in code blocks (\`\`\`), quotes, or other delimiters.
+
+---
+**Example 1:**
+* **Input:** The Barcan formula is typically expressed as \`\\forall x \\Box Fx \\rightarrow \\Box \\forall x Fx\`.
+* **Output:** The Barcan formula is typically expressed as for all x, it is necessary that Fx, which implies that it is necessary that for all x, Fx.
+
+**Example 2:**
+* **Input:** The axiom of separation allows us to form a subset \`Y = \\{x \\in Z \\mid \\phi(x)\\}\`.
+* **Output:** The axiom of separation allows us to form a subset Y which is the set of all x in Z such that phi(x) is true.
+---
+
+**CONVERT THE FOLLOWING:**
+
+**Context:** ${contextInfo}
+**Paragraph:**
+${text}
+
+**Converted Paragraph:**
 `;
-  try {
-    const response = await openai.responses.create({
-      "model": "gpt-5-nano",
-      input: prompt,
-      text: {
-        "verbosity": "low"
-      },
-      "reasoning": {
-        "effort": "minimal"
-      }
-    });
+  return callGPTAPI(prompt, text, 'Calling GPT to convert TeX to natural language');
+};
 
-    return response.output_text;
-  } catch (error) {
-    console.error("Error calling OpenAI API for table description generation:", error);
-    return "";
-  }
+async function gptCreateTableDescription(tableElem: string, articleTitle = "", sectionHeading = ""): Promise<string> {
+  const contextParts = [];
+  contextParts.push("Stanford Encyclopedia of Philosophy");
+  if (articleTitle) contextParts.push(articleTitle);
+  if (sectionHeading) contextParts.push(sectionHeading);
+  const contextInfo = contextParts.join(" - ");
+
+  const prompt = `# Task: Summarize HTML Table
+
+Your task is to analyze the provided HTML \`<table>\` and generate a concise natural language summary. The summary should capture the table's main purpose, structure, and key information.
+
+**Instructions:**
+1.  **Summarize, Don't Transcribe:** Do not describe every row or cell. Identify the key patterns, relationships, or conclusions presented in the table.
+2.  **Translate TeX:** If the table contains TeX notation (e.g., \`\\forall\`, \`$..$\`), translate it into plain English as part of your summary.
+3.  **Concise & Clear:** The output must be a single, easy-to-read description.
+4.  **Plain Text Output:** Provide only the summary. Do not include any HTML, TeX, markdown, or explanatory preambles in your response.
+
+---
+**Example:**
+* **Input Table:**
+\`\`\`html
+<table>
+  <thead>
+    <tr><th>System</th><th>Characteristic Axiom</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>K</td><td>(None)</td><td>Base system for modal logic.</td></tr>
+    <tr><td>T</td><td>$\\Box A \\rightarrow A$</td><td>Adds the axiom of necessity.</td></tr>
+    <tr><td>S4</td><td>$\\Box A \\rightarrow \\Box\\Box A$</td><td>Builds on T, adds the axiom for transitivity.</td></tr>
+  </tbody>
+</table>
+\`\`\`
+* **Output Summary:**
+A table presenting three modal logic systems, showing how they are built by adding axioms. The base system K has no unique axiom. System T extends K by adding the axiom stating that if A is necessary, then A is true. System S4 further builds on T with an axiom for transitivity, stating that if A is necessary, then it is necessary that A is necessary.
+---
+
+**SUMMARIZE THE FOLLOWING TABLE:**
+
+**Context:** ${contextInfo}
+**Input Table:**
+${tableElem}
+
+**Summary:**
+`;
+  return callGPTAPI(prompt, "", 'Calling GPT to generate table description');
 };
 
 async function processTex(text: string, forRetrieval: boolean = true): Promise<string> {
   const replacedText = replaceTexWithSymbols(text);
-  // if tex is still present, send to gpt-5-nano to convert to natural language
-  // look for \( ... \) or \[ ... \]
-  const texPattern = /(?:\\\(|\\\[)(.*?)(?:\\\)|\\\])/s;
-  if (texPattern.test(replacedText)) {
+  if (TEX_PATTERN.test(replacedText)) {
     if (forRetrieval) {
       // For retrieval, convert all TeX to natural language
       return await gptConvertTexToText(replacedText);
@@ -475,10 +558,12 @@ function convertTableToMarkdown(tableHtml: string): string {
   return markdown;
 }
 
+// ============================================================================
+// TABLE CONVERSION
+// ============================================================================
+
 async function convertTablesToDescriptions(text: string, articleTitle = "", sectionHeading = ""): Promise<string> {
-  // Find all table elements and convert them to descriptions
-  const tableRegex = /<table[^>]*>[\s\S]*?<\/table>/gi;
-  const tables = text.match(tableRegex);
+  const tables = text.match(TABLE_REGEX);
 
   if (!tables || tables.length === 0) {
     return text;
@@ -498,9 +583,7 @@ async function convertTablesToDescriptions(text: string, articleTitle = "", sect
 }
 
 function convertTablesToMarkdown(text: string): string {
-  // Find all table elements and convert them to markdown (for generation)
-  const tableRegex = /<table[^>]*>[\s\S]*?<\/table>/gi;
-  const tables = text.match(tableRegex);
+  const tables = text.match(TABLE_REGEX);
 
   if (!tables || tables.length === 0) {
     return text;
@@ -537,6 +620,10 @@ function normaliseWhitespace(text: string, keepNewLines = false): string {
   }
   return text.replace(/\s+/g, ' ').trim();
 }
+
+// ============================================================================
+// HTML TAG STRIPPING
+// ============================================================================
 
 function stripHTMLTags(html: string): string {
   const PRESERVE_TAGS = new Set(['figure', 'figcaption']);
@@ -605,6 +692,10 @@ async function fetchArticlesList(): Promise<ArticleID[]> {
   const uniqueArticleIDs = Array.from(new Set(articleIDs));
   return uniqueArticleIDs;
 }
+
+// ============================================================================
+// FIGURE PROCESSING
+// ============================================================================
 
 /**
  * Extract all figure IDs from HTML content.
@@ -763,7 +854,12 @@ function extractFigureDescription(
 
 /**
  * Process figures in article content: extract descriptions and normalize HTML.
- * Replaces complex figure HTML with simple <figure><figcaption>...</figcaption></figure>
+ * Fetches extended descriptions from figdesc.html if available, then replaces
+ * complex figure HTML with standardized <figure><figcaption>...</figcaption></figure>.
+ * 
+ * @param html - The HTML content containing figures
+ * @param articleUrl - The base URL of the article (for fetching figdesc.html)
+ * @returns HTML with normalized figure elements
  */
 async function processFiguresInContent(
   html: string,
@@ -792,6 +888,17 @@ async function processFiguresInContent(
   return $.html();
 }
 
+// ============================================================================
+// ARTICLE FETCHING
+// ============================================================================
+
+/**
+ * Fetch and parse an article from the Stanford Encyclopedia of Philosophy.
+ * 
+ * @param id - The article ID (e.g., "wittgenstein", "logic-propositional")
+ * @returns Parsed article with metadata, preamble, sections, and related articles
+ * @throws Error if the article cannot be fetched or parsed
+ */
 async function fetchArticleContent(id: ArticleID): Promise<Article> {
   const url = `${baseArticleURL}${id}/`;
   const response = await fetch(url);
@@ -966,6 +1073,10 @@ async function processArticleSectionDual(
   return chunks;
 }
 
+// ============================================================================
+// SECTION ITEM PROCESSING
+// ============================================================================
+
 /**
  * Split HTML into semantic items (paragraphs, lists, tables, figures, etc.)
  */
@@ -1056,6 +1167,25 @@ function splitHtmlIntoItems(html: string): SectionItem[] {
   return items;
 }
 
+/**
+ * Preprocess a section item into dual formats for retrieval and generation.
+ * 
+ * Retrieval format:
+ * - Normalized text without diacritics
+ * - TeX converted to natural language
+ * - Lists without markers
+ * - Tables as natural language descriptions
+ * 
+ * Generation format:
+ * - Preserves some formatting (list markers, markdown tables)
+ * - TeX kept in readable format (symbols replaced)
+ * - Better for LLM context
+ * 
+ * @param item - The section item to preprocess
+ * @param articleTitle - Title of the article (for table context)
+ * @param sectionHeading - Heading of the section (for table context)
+ * @returns Object with retrieval and generation text
+ */
 async function preprocessItemDual(item: SectionItem, articleTitle: string, sectionHeading: string): Promise<{ retrieval: string; generation: string; }> {
   const { kind, html } = item;
 
@@ -1181,7 +1311,7 @@ async function preprocessItemDual(item: SectionItem, articleTitle: string, secti
  * Set the article ID to test (e.g., "logic-propositional", "consciousness", "kant")
  * Find article IDs in URLs like: https://plato.stanford.edu/entries/logic-propositional/
  */
-const TEST_ARTICLE_ID = "wittgenstein"; // <-- CHANGE THIS TO TEST DIFFERENT ARTICLES
+const TEST_ARTICLE_ID = "logic-propositional"; // <-- CHANGE THIS TO TEST DIFFERENT ARTICLES
 
 /**
  * Maximum tokens per chunk (default: 1024)
