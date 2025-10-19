@@ -18,4 +18,68 @@ RRF: dense & sparse -> 25 chunks
 BGE: 25 -> 5 (use cleaned)
 LLM generation: 5 parent sections in rich format
 
-Chunk size: 512 - 1024 (semantic chunking)
+Chunk size: <= 1024 (semantic chunking)
+BM25: b=0.85, k1=1.6
+
+
+
+
+### ## Stack Summary
+
+| Component | Cloudflare Service | Purpose |
+| :--- | :--- | :--- |
+| **Query Handling** | `rag-api-worker` | User-facing API for search and generation. |
+| **Data Ingestion** | `ingestion-worker` | Scheduled job for scraping and processing SEP articles. |
+| **Dense Vectors** | Vectorize | Stores `bge-m3` embeddings for semantic search. |
+| **Sparse Index** | D1 (with FTS5) | Stores "retrieval chunks" for BM25 keyword search. |
+| **Context Storage** | D1 / R2 | Stores full sections or "generation chunks" for the LLM. |
+| **Object Storage** | R2 | Stores raw HTML or structured "generation chunks". |
+| **AI Models** | Workers AI | Provides serverless inference for `bge-m3` and `bge-reranker-base`. |
+| **Scheduling** | Cron Triggers | Automates the `ingestion-worker`. |
+
+---
+
+### ## Worker 1: The RAG API (`rag-api-worker`) 🧠
+
+This is your primary, user-facing Worker. It's designed for low latency and orchestrates the entire request-response pipeline in real-time.
+
+**Trigger:** Public HTTP endpoint (e.g., `https://your-worker.your-domain.com/query`).
+
+**Responsibilities:**
+
+1.  **Receive Query:** Accepts a user's question via a `POST` request.
+2.  **Parallel Retrieval (Hybrid Search):** It initiates two search processes simultaneously to fetch an initial set of candidate chunks.
+    * **Dense Search:** Embeds the incoming query using Workers AI (`@cf/baai/bge-m3`) and queries your **Cloudflare Vectorize** index to find semantically similar chunks.
+    * **Sparse Search:** Cleans the query (lowercase, remove stopwords) and queries the **D1 FTS5** virtual table using `MATCH` and `bm25()` ranking to find chunks with the best keyword overlap.
+3.  **Fuse & Rerank:**
+    * It combines and deduplicates the results from both searches. A common technique here is Reciprocal Rank Fusion (RRF) to create a single, more robust list of candidates.
+    * It takes the top N candidates (e.g., 25) and passes each one, along with the original query, to the **Workers AI** reranker model (`@cf/baai/bge-reranker-base`) for precise relevance scoring.
+4.  **Assemble Context:**
+    * It selects the top 5 reranked chunks.
+    * Using metadata stored alongside the chunks in **D1**, it fetches the full parent sections for these top 5 chunks.
+5.  **Generate Response:**
+    * It constructs a final prompt containing the rich context from the parent sections and the original user query.
+    * It makes an external `fetch` call to your chosen LLM API.
+    * It streams the final answer back to the user.
+
+---
+
+### ## Worker 2: The Ingestion Pipeline (`ingestion-worker`) 📚
+
+This Worker is your behind-the-scenes data processor. It's not latency-sensitive and is designed to run as a scheduled background task to keep your knowledge base fresh.
+
+**Trigger:** Cron Trigger for scheduled updates (e.g., `0 4 * * *` to run daily at 4 AM) and can be invoked manually for the initial bulk processing.
+
+**Responsibilities:**
+
+1.  **Check for Updates:** Fetches the SEP "What's New" page or RSS feed to identify new or substantially revised articles.
+2.  **Scrape & Parse:** For each new or updated article, it fetches the raw HTML and parses it to extract the core content, structure, and metadata (title, author, section headings). You can store the raw HTML in **R2** as a backup.
+3.  **Chunk Content:** It applies your chunking strategy:
+    * Creates "retrieval chunks" (e.g., clean text paragraphs) for the search indexes.
+    * Creates structured "generation chunks" and stores them in **R2**.
+4.  **Vectorize & Index:** For each "retrieval chunk," it performs the following database operations:
+    * Calls **Workers AI** (`@cf/baai/bge-m3`) to create a vector embedding.
+    * Inserts the vector and a chunk ID into your **Vectorize** index.
+    * Inserts the chunk text and its metadata (article URL, parent section ID) into your primary **D1** table.
+    * Inserts the chunk text into the **D1 FTS5** virtual table for BM25.
+5.  **Handle Updates:** When processing an updated article, it first deletes all existing chunks, vectors, and metadata associated with that article before inserting the new versions. This prevents stale data.

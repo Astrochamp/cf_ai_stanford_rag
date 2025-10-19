@@ -1,22 +1,50 @@
 /**
- * Welcome to Cloudflare Workers! This is your first worker.
+ * Cloudflare Workers RPC-enabled embedding service
+ * 
+ * This worker provides text embedding functionality using Cloudflare AI (BGE-M3 model)
+ * and can be called via both HTTP fetch and RPC from other Workers.
  *
- * - Run `npm run dev` in your terminal to start a development server
- * - Open a browser tab at http://localhost:8787/ to see your worker in action
- * - Run `npm run deploy` to publish your worker
- *
- * Bind resources to your worker in `wrangler.jsonc`. After adding bindings, a type definition for the
- * `Env` object can be regenerated with `npm run cf-typegen`.
- *
- * Learn more at https://developers.cloudflare.com/workers/
+ * === HOW TO CALL THIS WORKER VIA RPC FROM OTHER WORKERS ===
+ * 
+ * 1. Add this worker as a service binding in your calling worker's wrangler.jsonc:
+ * 
+ *    "services": [
+ *      {
+ *        "binding": "EMBED_SERVICE",
+ *        "service": "embed-text",
+ *        "environment": "production"
+ *      }
+ *    ]
+ * 
+ * 2. Update your Env interface to include the binding:
+ * 
+ *    interface Env {
+ *      EMBED_SERVICE: Service<EmbedTextService>;
+ *      // ... other bindings
+ *    }
+ * 
+ * 3. Call the embedding function from your worker:
+ * 
+ *    const result = await env.EMBED_SERVICE.getEmbedding("Your text here");
+ *    console.log(result.data); // Normalized embedding vectors
+ * 
+ * 4. Type the import (optional but recommended):
+ * 
+ *    import type { EmbedTextService } from './path/to/embed-text/src/index';
+ * 
+ * Benefits of RPC over HTTP:
+ * - Lower latency (no network overhead)
+ * - Type safety with TypeScript
+ * - No serialization overhead for complex types
+ * - Automatic authentication (no need for API keys between your workers)
  */
 
-interface RequestBody {
-  text: string;
-}
+import { WorkerEntrypoint } from 'cloudflare:workers';
 
-function isRequestBody(obj: any): obj is RequestBody {
-  return obj && typeof obj.text === 'string';
+interface EmbeddingResult {
+  shape: number[];
+  data: Float32Array[];
+  pooling: string;
 }
 
 function normalize(vector: Float32Array): Float32Array {
@@ -37,28 +65,23 @@ function normalize(vector: Float32Array): Float32Array {
   return normalizedVector;
 }
 
-export default {
-  async fetch(request, env, ctx): Promise<Response> {
-    if (request.method !== 'POST') {
-      return new Response('Please send a POST request with a JSON body.', { status: 405 });
-    }
-
-    const body: unknown = await request.json();
-
-    if (!isRequestBody(body)) {
-      return new Response('JSON body must be an object with a "text" property of type string.', {
-        status: 400,
-      });
-    }
-
-    const inputText = body.text;
-
+/**
+ * RPC-compatible class that exposes the embedding functionality
+ * This can be called directly from other Workers via service bindings
+ */
+export class EmbedTextService extends WorkerEntrypoint<Env> {
+  /**
+   * Generate normalized embeddings for the given text
+   * @param text - The input text to embed
+   * @returns EmbeddingResult containing shape, normalized vectors, and pooling method
+   */
+  async getEmbedding(text: string): Promise<EmbeddingResult> {
     const inputData = {
-      text: inputText,
+      text: text,
       truncate_inputs: false
     } as Ai_Cf_Baai_Bge_M3_Input;
 
-    const batchedResponse = await env.AI.run(
+    const batchedResponse = await this.env.AI.run(
       '@cf/baai/bge-m3',
       inputData,
     ) as BGEM3OuputEmbedding;
@@ -69,13 +92,10 @@ export default {
       },
     ) ?? [];
 
-    const responseData = {
-      shape: batchedResponse.shape,
+    return {
+      shape: batchedResponse.shape ?? [],
       data: embeddings,
-      pooling: batchedResponse.pooling,
+      pooling: batchedResponse.pooling ?? 'cls',
     };
-
-    return Response.json({ batchedInput: inputData, responseData });
-
-  },
-} satisfies ExportedHandler<Env>;
+  }
+}
