@@ -494,6 +494,7 @@ async function batchConvertTexToText(
     texts,
     (text) => ({
       prompt: `# Task: Convert TeX to Natural Language
+Do NOT use ANY reasoning for this task! Terminate reasoning as soon as you begin.
 
 You will receive a paragraph from a philosophical text. Your job is to find all TeX notation and rewrite it as a natural language phrase.
 
@@ -538,6 +539,7 @@ async function gptCreateTableDescription(tableElem: string, articleTitle = "", s
   const contextInfo = contextParts.join(" - ");
 
   const prompt = `# Task: Summarize HTML Table
+Do NOT use ANY reasoning for this task! Terminate reasoning as soon as you begin.
 
 Your task is to analyze the provided HTML \`<table>\` and generate a concise natural language summary. The summary should capture the table's main purpose, structure, and key information.
 
