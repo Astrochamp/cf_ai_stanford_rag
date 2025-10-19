@@ -1086,15 +1086,29 @@ async function fetchArticleContent(id: ArticleID): Promise<Article> {
     const shortName = $(element).attr('id') || '';
 
     let content = '';
-    let nextElement = $(element).next();
+    let nextSibling = (element as any).nextSibling;
 
-    while (nextElement.length > 0) {
-      if (nextElement.is('h2, h3, h4, h5, h6')) {
-        break;
+    while (nextSibling) {
+      // Check if it's a heading element (stop here)
+      if (nextSibling.type === 'tag') {
+        const tagName = (nextSibling as any).name?.toLowerCase();
+        if (tagName && ['h2', 'h3', 'h4', 'h5', 'h6'].includes(tagName)) {
+          break;
+        }
       }
 
-      content += $.html(nextElement);
-      nextElement = nextElement.next();
+      // Add the node (element or text node) to content
+      const $sibling = $(nextSibling);
+      if (nextSibling.type === 'text') {
+        // For text nodes, preserve the raw text
+        const textContent = nextSibling.data || '';
+        content += textContent;
+      } else {
+        // For element nodes, get the full HTML
+        content += $.html($sibling);
+      }
+
+      nextSibling = nextSibling.nextSibling;
     }
 
     // some sections may be empty (e.g. a heading with subheadings but no content of its own)
@@ -1245,7 +1259,10 @@ function splitHtmlIntoItems(html: string): SectionItem[] {
     if (node.type === 'text') {
       const text = (node.data || '').trim();
       if (text.length > 0) {
-        items.push({ kind: 'paragraph', html: `<p>${text}</p>` });
+        // Preserve the raw text content, especially for TeX notation
+        // Use a cheerio element to properly encode the text
+        const $p = $('<p></p>').text(text);
+        items.push({ kind: 'paragraph', html: $.html($p) });
       }
       return;
     }
@@ -1518,9 +1535,9 @@ async function batchPreprocessItemsDual(
       const $ = cheerio.load(html);
       const $table = $('table').first();
       const tableHtml = $table.length > 0 ? $.html($table) : html;
-      
+
       tablesToProcess.push({ index: i, html: tableHtml });
-      
+
       // Placeholder - will be filled after batch table processing
       prepared.push({
         index: i,
@@ -1622,7 +1639,7 @@ async function batchPreprocessItemsDual(
 
   // Phase 3: Batch process all TeX conversions in parallel
   const texConversionsNeeded = prepared.filter(p => p.needsRetrievalTexConversion);
-  
+
   if (texConversionsNeeded.length > 0) {
     const texInputs = texConversionsNeeded.map(p => p.retrieval);
     const texOutputs = await batchConvertTexToText(texInputs, articleTitle, sectionHeading);
