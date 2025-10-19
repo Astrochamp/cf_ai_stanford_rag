@@ -344,6 +344,8 @@ async function gptConvertTexToText(text: string): Promise<string> {
     return text;
   }
 
+  console.log('  → Calling GPT to convert TeX to natural language...');
+
   const prompt = `Convert TeX expressions in this text to concise plain English, using symbols where possible. Respond with the updated text and nothing else, WITHOUT triple-quotes. Do NOT think step-by-step. Do NOT make any other changes to the text.
 
 Text:
@@ -381,6 +383,8 @@ async function gptCreateTableDescription(tableElem: string, articleTitle = "", s
   if (articleTitle) contextParts.push(articleTitle);
   if (sectionHeading) contextParts.push(sectionHeading);
   const contextInfo = contextParts.join(" - ");
+
+  console.log('  → Calling GPT to generate table description...');
 
   const prompt = `Write a concise natural language description of this HTML table. The table may contain TeX expressions. Respond with the description and nothing else, WITHOUT triple-quotes. Do NOT think step-by-step. Context: ${contextInfo}
 
@@ -1077,8 +1081,9 @@ function extractSemanticUnits(text: string): string[] {
   return mergedUnits;
 }
 
-// === Item-based helpers ===
-
+/**
+ * Split HTML into semantic items (paragraphs, lists, tables, figures, etc.)
+ */
 function splitHtmlIntoItems(html: string): SectionItem[] {
   const items: SectionItem[] = [];
   // Wrap the fragment so we can reliably iterate top-level nodes
@@ -1283,287 +1288,271 @@ async function preprocessItemDual(item: SectionItem, articleTitle: string, secti
   }
 }
 
+// ============================================================================
+// TEST CONFIGURATION
+// ============================================================================
 
+/**
+ * Set the article ID to test (e.g., "logic-propositional", "consciousness", "kant")
+ * Find article IDs in URLs like: https://plato.stanford.edu/entries/logic-propositional/
+ */
+const TEST_ARTICLE_ID = "wittgenstein"; // <-- CHANGE THIS TO TEST DIFFERENT ARTICLES
 
-// EXAMPLE of figure and caption from SEP HTML source
-// This example shows how SEP structures figures with:
-// - Multiple sub-figures with individual alt text
-// - Short caption with figure label
-// - Link to extended description on figdesc.html
-// The processFiguresInContent function will normalize this to a simple <figure><figcaption>...</figcaption></figure>
-const _example_fig_html = `<div class="figure centered avoid-break" id="fig1">
+/**
+ * Maximum tokens per chunk (default: 1024)
+ */
+const MAX_TOKENS_PER_CHUNK = 1024;
 
-<div id="fig1a" style="display: inline-block; width:45%">
-<img alt="a rectangle one half blue and one half white with a solid black line between the two halves" src="figure1a.svg" style="width:2in" />
+/**
+ * Output directory for test results
+ */
+const OUTPUT_DIR = "./test_output";
 
-<p class="center">
-(a)</p>
-</div>
+// ============================================================================
+// TEST RUNNER
+// ============================================================================
 
-<div id="fig1c" style="display: inline-block; width:45%">
-<img alt="same rectangle with no black line between the two halves" src="figure1b.svg" style="width:2in" />
+async function testArticleProcessing(articleId: string) {
+  console.log('\n' + '='.repeat(80));
+  console.log(`TESTING ARTICLE: ${articleId}`);
+  console.log('='.repeat(80) + '\n');
 
-<p class="center">
-(b)</p>
-</div>
+  // Ensure output directory exists
+  if (!fs.existsSync(OUTPUT_DIR)) {
+    fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+  }
 
-<div id="fig1b" style="display: inline-block; width:45%">
-<img alt="same rectangle but colors now in a gradient from blue at one end to white at the other" src="figure1c.svg" style="width:2in" />
-
-<p class="center">
-(c)</p>
-</div>
-
-<div id="fig1d" style="display: inline-block; width:45%">
-<img alt="same rectangle but now a solid light blue" src="figure1d.svg" style="width:2in" />
-
-<p class="center">
-(d)</p>
-</div>
-
-<p class="center">
-<span class="figlabel">Figure 1</span> [An
- <a href="figdesc.html#fig1">extended description of figure 1</a>
- is in the supplement.]</p>
-</div>`;
-
-
-
-
-
-// Test data
-const TEST_ARTICLE_TITLE = "Propositional Logic";
-const TEST_SECTION_HEADING = "2.1 Truth-functionality";
-
-const example_text = `<p>
-One sees that \\(f_1^1\\) performs no operation on its input and is
-essentially the same as \\(\\top\\). \\(f_4^1\\) is similarly an impostor:
-\\(\\bot\\) dressed up as a unary function. One can quickly check that
-the number of <i>n</i>-ary truth functions is \\(2^{2^n}\\)&mdash;there
-being 2 possible output values on each of the \\(2^n\\) possible
-<i>n</i>-tuples of input values, and that at each stage, a number of
-truth functions are impostors from lower arity. A case of special
-interest are the sixteen binary truth functions, which one can fully
-individuate by specifying their range on the 4 possible input
-values:</p>
-
-<div class="center">
-
-<table class="cellpad-small-dense cell-center two-rulesTH centered">
-<colgroup class="colhead" span="1"> </colgroup> <colgroup span="4">
-</colgroup>
-<thead>
-<tr class="header">
-<th>input</th>
-<th>\\(\\langle\\bT, \\bT\\rangle\\)</th>
-<th>\\(\\langle\\bT, \\bF\\rangle\\)</th>
-<th>\\(\\langle\\bF, \\bT\\rangle\\)</th>
-<th>\\(\\langle\\bF, \\bF\\rangle\\)</th> </tr> </thead>
-<tbody>
-<tr class="odd">
-<th>\\(f_1^2\\)</th>
-  <td>\\(\\bT\\)</td>
-  <td>\\(\\bT\\)</td>
-  <td>\\(\\bT\\)</td>
-  <td>\\(\\bT\\)</td> </tr>
-<tr class="even">
-<th>\\(f_2^2\\)</th>
-  <td>\\(\\bT\\)</td>
-  <td>\\(\\bT\\)</td>
-  <td>\\(\\bT\\)</td>
-  <td>\\(\\bF\\)</td> </tr>
-<tr class="odd">
-<th>\\(f_3^2\\)</th>
-  <td>\\(\\bT\\)</td>
-  <td>\\(\\bT\\)</td>
-  <td>\\(\\bF\\)</td>
-  <td>\\(\\bT\\)</td> </tr>
-<tr class="even">
-<th>\\(f_4^2\\)</th>
-  <td>\\(\\bT\\)</td>
-  <td>\\(\\bT\\)</td>
-  <td>\\(\\bF\\)</td>
-  <td>\\(\\bF\\)</td> </tr>
-<tr class="odd">
-<th>\\(f_5^2\\)</th>
-  <td>\\(\\bT\\)</td>
-  <td>\\(\\bF\\)</td>
-  <td>\\(\\bT\\)</td>
-  <td>\\(\\bT\\)</td> </tr>
-<tr class="even">
-<th>\\(f_6^2\\)</th>
-  <td>\\(\\bT\\)</td>
-  <td>\\(\\bF\\)</td>
-  <td>\\(\\bT\\)</td>
-  <td>\\(\\bF\\)</td> </tr>
-<tr class="odd">
-<th>\\(f_7^2\\)</th>
-  <td>\\(\\bT\\)</td>
-  <td>\\(\\bF\\)</td>
-  <td>\\(\\bF\\)</td>
-  <td>\\(\\bT\\)</td> </tr>
-<tr class="even">
-<th>\\(f_8^2\\)</th>
-  <td>\\(\\bT\\)</td>
-  <td>\\(\\bF\\)</td>
-  <td>\\(\\bF\\)</td>
-  <td>\\(\\bF\\)</td> </tr>
-<tr class="odd">
-<th>\\(f_9^2\\)</th>
-  <td>\\(\\bF\\)</td>
-  <td>\\(\\bT\\)</td>
-  <td>\\(\\bT\\)</td>
-  <td>\\(\\bT\\)</td> </tr>
-<tr class="even">
-<th>\\(f_{10}^2\\)</th>
-  <td>\\(\\bF\\)</td>
-  <td>\\(\\bT\\)</td>
-  <td>\\(\\bT\\)</td>
-  <td>\\(\\bF\\)</td> </tr>
-<tr class="odd">
-<th>\\(f_{11}^2\\)</th>
-  <td>\\(\\bF\\)</td>
-  <td>\\(\\bT\\)</td>
-  <td>\\(\\bF\\)</td>
-  <td>\\(\\bT\\)</td> </tr>
-<tr class="even">
-<th>\\(f_{12}^2\\)</th>
-  <td>\\(\\bF\\)</td>
-  <td>\\(\\bT\\)</td>
-  <td>\\(\\bF\\)</td>
-  <td>\\(\\bF\\)</td> </tr>
-<tr class="odd">
-<th>\\(f_{13}^2\\)</th>
-  <td>\\(\\bF\\)</td>
-  <td>\\(\\bF\\)</td>
-  <td>\\(\\bT\\)</td>
-  <td>\\(\\bT\\)</td> </tr>
-<tr class="even">
-<th>\\(f_{14}^2\\)</th>
-  <td>\\(\\bF\\)</td>
-  <td>\\(\\bF\\)</td>
-  <td>\\(\\bT\\)</td>
-  <td>\\(\\bF\\)</td> </tr>
-<tr class="odd">
-<th>\\(f_{15}^2\\)</th>
-  <td>\\(\\bF\\)</td>
-  <td>\\(\\bF\\)</td>
-  <td>\\(\\bF\\)</td>
-  <td>\\(\\bT\\)</td> </tr>
-<tr class="even">
-<th>\\(f_{16}^2\\)</th>
-  <td>\\(\\bF\\)</td>
-  <td>\\(\\bF\\)</td>
-  <td>\\(\\bF\\)</td>
-  <td>\\(\\bF\\)</td> </tr> </tbody>
-</table>
-
-</div>
-
-<p>
-One immediately recognizes the impostors \\(f_1^2 = \\top\\), \\(f_4^2 =
-f_2^1\\) acting on the first input value, \\(f_6^2 = f_2^1\\) acting on
-the second input value, \\(f_{11}^2 = f_3^1\\) acting on the second
-input value, \\(f_{13}^2 = f_3^1\\) action on the first value, and
-\\(f_{16}^2 = \\bot\\), leaving ten essentially new binary truth
-functions.</p>`;
-
-async function runTests() {
-  console.log('\n=== Testing Dual-Format Preprocessing Pipeline ===\n');
+  const startTime = Date.now();
 
   try {
-    // Test 0: Figure processing
-    console.log('Test 0: Figure processing...');
-    const mockExtendedDescriptions = new Map<string, string>([
-      ['fig1', '<p>This figure shows four variations of a rectangle to illustrate color boundaries:</p><ul><li>(a) Sharp boundary with black line</li><li>(b) Sharp boundary without line</li><li>(c) Gradient boundary</li><li>(d) Uniform color</li></ul>']
-    ]);
+    // Step 1: Fetch article
+    console.log(`\n[1/4] Fetching article "${articleId}"...`);
+    const article = await fetchArticleContent(articleId as ArticleID);
+    console.log(`✓ Fetched article: "${article.title}" (${article.originalTitle})`);
+    console.log(`  Authors: ${article.authors.join(', ')}`);
+    console.log(`  Sections: ${article.sections.length}`);
+    console.log(`  Related articles: ${article.related.length}`);
 
-    // Test extractFigureDescription with the example figure
-    const $fig = cheerio.load(_example_fig_html);
-    const description = extractFigureDescription($fig.root(), 'fig1', mockExtendedDescriptions, $fig);
-    console.log('✓ Extracted figure description:');
-    console.log(`  ${description.slice(0, 150)}...`);
+    // Step 2: Process preamble
+    console.log(`\n[2/4] Processing preamble...`);
+    const preambleChunks = await processArticleSectionDual(
+      {
+        shortName: 'preamble',
+        number: '',
+        heading: 'Preamble',
+        content: article.preamble
+      },
+      article.title,
+      MAX_TOKENS_PER_CHUNK
+    );
+    console.log(`✓ Preamble split into ${preambleChunks.length} chunk(s)`);
 
-    // Test processFiguresInContent (simulated - would normally fetch from server)
-    console.log('\n✓ Figure processing functions implemented');
-    console.log('  • extractFigureDescription: Priority = extended > caption > alt text');
-    console.log('  • processFiguresInContent: Normalizes figures to <figure><figcaption>');
-    console.log('  • Integrated into fetchArticleContent pipeline');
+    // Step 3: Process all sections
+    console.log(`\n[3/4] Processing ${article.sections.length} section(s)...`);
+    const allSectionChunks: {
+      section: ArticleSection;
+      chunks: ProcessedChunk[];
+    }[] = [];
 
-    // Test 1: Dual-format preprocessing
-    console.log('\n\nTest 1: Dual-format preprocessing...');
-    const { retrieval, generation } = await preprocessTextDual(example_text, TEST_ARTICLE_TITLE, TEST_SECTION_HEADING);
+    for (let i = 0; i < article.sections.length; i++) {
+      const section = article.sections[i];
+      const sectionLabel = section.number
+        ? `${section.number} ${section.heading}`
+        : section.heading;
 
-    fs.writeFileSync('debug_output_retrieval.txt', retrieval);
-    fs.writeFileSync('debug_output_generation.txt', generation);
-    console.log('✓ Retrieval format saved to debug_output_retrieval.txt');
-    console.log('✓ Generation format saved to debug_output_generation.txt');
+      console.log(`  [${i + 1}/${article.sections.length}] Processing: ${sectionLabel}...`);
 
-    console.log('\nRetrieval format preview (first 200 chars):');
-    console.log(retrieval.slice(0, 200) + '...');
-    console.log('\nGeneration format preview (first 200 chars):');
-    console.log(generation.slice(0, 200) + '...');
+      const chunks = await processArticleSectionDual(
+        section,
+        article.title,
+        MAX_TOKENS_PER_CHUNK
+      );
 
-    // Test 2: Semantic chunking with dual formats
-    console.log('\n\nTest 2: Dual-format semantic chunking...');
-    const mockSection: ArticleSection = {
-      shortName: "TruthFunc",
-      number: "2.1",
-      heading: "Truth-functionality",
-      content: example_text
+      allSectionChunks.push({ section, chunks });
+      console.log(`    → ${chunks.length} chunk(s) | ${chunks.reduce((sum, c) => sum + c.tokenCount, 0)} total tokens`);
+    }
+
+    // Step 4: Generate output files
+    console.log(`\n[4/4] Writing output files...`);
+
+    // Create article-specific output directory
+    const articleDir = `${OUTPUT_DIR}/${articleId}`;
+    if (!fs.existsSync(articleDir)) {
+      fs.mkdirSync(articleDir, { recursive: true });
+    }
+
+    // Write article metadata
+    const metadata = {
+      id: article.id,
+      title: article.title,
+      originalTitle: article.originalTitle,
+      authors: article.authors,
+      related: article.related,
+      sectionCount: article.sections.length,
+      totalChunks: preambleChunks.length + allSectionChunks.reduce((sum, s) => sum + s.chunks.length, 0),
+      maxTokensPerChunk: MAX_TOKENS_PER_CHUNK,
+      processedAt: new Date().toISOString()
     };
+    fs.writeFileSync(`${articleDir}/metadata.json`, JSON.stringify(metadata, null, 2));
+    console.log(`  ✓ metadata.json`);
 
-    const dualChunks = await processArticleSectionDual(mockSection, TEST_ARTICLE_TITLE, 1024);
-    console.log(`✓ Created ${dualChunks.length} chunk(s) with dual formats`);
+    // Write preamble chunks
+    if (preambleChunks.length > 0) {
+      const preambleOutput = {
+        section: "Preamble",
+        chunks: preambleChunks.map((c, i) => ({
+          chunkNumber: i + 1,
+          tokenCount: c.tokenCount,
+          retrievalText: c.retrievalText,
+          generationText: c.generationText
+        }))
+      };
+      fs.writeFileSync(`${articleDir}/preamble.json`, JSON.stringify(preambleOutput, null, 2));
+      console.log(`  ✓ preamble.json (${preambleChunks.length} chunks)`);
+    }
 
-    dualChunks.forEach((chunk, i) => {
-      console.log(`\n  Chunk ${i + 1}: ${chunk.tokenCount} tokens`);
-      console.log(`    Retrieval preview: ${chunk.retrievalText.slice(0, 100)}...`);
-      console.log(`    Generation preview: ${chunk.generationText.slice(0, 100)}...`);
-    });
+    // Write section chunks
+    for (let i = 0; i < allSectionChunks.length; i++) {
+      const { section, chunks } = allSectionChunks[i];
+      const filename = section.shortName
+        ? `section_${i + 1}_${section.shortName}.json`
+        : `section_${i + 1}.json`;
 
-    const chunksOutput = {
-      chunks: dualChunks.map((c, i) => ({
+      const sectionOutput = {
+        sectionNumber: section.number,
+        sectionHeading: section.heading,
+        shortName: section.shortName,
+        chunks: chunks.map((c, j) => ({
+          chunkNumber: j + 1,
+          tokenCount: c.tokenCount,
+          retrievalText: c.retrievalText,
+          generationText: c.generationText
+        }))
+      };
+
+      fs.writeFileSync(`${articleDir}/${filename}`, JSON.stringify(sectionOutput, null, 2));
+      console.log(`  ✓ ${filename} (${chunks.length} chunks)`);
+    }
+
+    // Write complete article (all chunks in one file)
+    const completeOutput = {
+      metadata,
+      preamble: preambleChunks.map((c, i) => ({
+        section: "Preamble",
         chunkNumber: i + 1,
         tokenCount: c.tokenCount,
         retrievalText: c.retrievalText,
         generationText: c.generationText
+      })),
+      sections: allSectionChunks.map(({ section, chunks }) => ({
+        sectionNumber: section.number,
+        sectionHeading: section.heading,
+        shortName: section.shortName,
+        chunks: chunks.map((c, i) => ({
+          chunkNumber: i + 1,
+          tokenCount: c.tokenCount,
+          retrievalText: c.retrievalText,
+          generationText: c.generationText
+        }))
       }))
     };
-    fs.writeFileSync('debug_chunks.json', JSON.stringify(chunksOutput, null, 2));
-    console.log('\n✓ Dual-format chunks saved to debug_chunks.json');
+    fs.writeFileSync(`${articleDir}/complete.json`, JSON.stringify(completeOutput, null, 2));
+    console.log(`  ✓ complete.json (full article)`);
 
-    // Test 3: Test with smaller chunk size
-    console.log('\n\nTest 3: Testing smaller chunk size (200 tokens)...');
-    const smallChunks = await processArticleSectionDual(mockSection, TEST_ARTICLE_TITLE, 200);
-    console.log(`✓ Created ${smallChunks.length} chunk(s) with 200 token limit`);
+    // Write human-readable summary
+    let summary = `ARTICLE PROCESSING SUMMARY\n`;
+    summary += `${'='.repeat(80)}\n\n`;
+    summary += `Article ID: ${article.id}\n`;
+    summary += `Title: ${article.title}\n`;
+    summary += `Original Title: ${article.originalTitle}\n`;
+    summary += `Authors: ${article.authors.join(', ')}\n`;
+    summary += `Related Articles: ${article.related.length}\n`;
+    summary += `Processed: ${new Date().toISOString()}\n`;
+    summary += `Max Tokens/Chunk: ${MAX_TOKENS_PER_CHUNK}\n`;
+    summary += `\n${'-'.repeat(80)}\n\n`;
 
-    smallChunks.forEach((chunk, i) => {
-      console.log(`  Chunk ${i + 1}: ${chunk.tokenCount} tokens`);
+    summary += `PREAMBLE:\n`;
+    summary += `  Chunks: ${preambleChunks.length}\n`;
+    summary += `  Total Tokens: ${preambleChunks.reduce((sum, c) => sum + c.tokenCount, 0)}\n\n`;
+
+    summary += `SECTIONS (${article.sections.length}):\n\n`;
+    allSectionChunks.forEach(({ section, chunks }, i) => {
+      const sectionLabel = section.number
+        ? `${section.number} ${section.heading}`
+        : section.heading;
+      const totalTokens = chunks.reduce((sum, c) => sum + c.tokenCount, 0);
+      summary += `  ${i + 1}. ${sectionLabel}\n`;
+      summary += `     Chunks: ${chunks.length} | Tokens: ${totalTokens}\n`;
     });
 
-    console.log('\n\n=== All Tests Passed ===\n');
+    summary += `\n${'-'.repeat(80)}\n\n`;
+    summary += `TOTALS:\n`;
+    summary += `  Total Chunks: ${metadata.totalChunks}\n`;
+    summary += `  Total Tokens: ${preambleChunks.reduce((sum, c) => sum + c.tokenCount, 0) + allSectionChunks.reduce((sum, s) => sum + s.chunks.reduce((s2, c) => s2 + c.tokenCount, 0), 0)}\n`;
 
-    // Summary
-    console.log('Summary of Format Differences:');
-    console.log('\nRETRIEVAL FORMAT (for embedding/search):');
-    console.log('  • Fully normalized (no diacritics)');
-    console.log('  • TeX converted to Unicode or natural language');
-    console.log('  • Tables converted to natural language descriptions');
-    console.log('  • Lists without markers (pure content)');
-    console.log('  • Maximum semantic density');
-    console.log('\nGENERATION FORMAT (for LLM context & display):');
-    console.log('  • Preserves diacritics and special characters');
-    console.log('  • TeX kept in readable format (simple symbols replaced)');
-    console.log('  • Tables converted to markdown');
-    console.log('  • Lists with proper markers (-, 1., a., etc.)');
-    console.log('  • Structured for better LLM comprehension');
+    fs.writeFileSync(`${articleDir}/SUMMARY.txt`, summary);
+    console.log(`  ✓ SUMMARY.txt`);
+
+    // Write sample chunks for inspection
+    const sampleChunks = [];
+    if (preambleChunks.length > 0) {
+      sampleChunks.push({
+        location: 'Preamble - Chunk 1',
+        ...preambleChunks[0]
+      });
+    }
+    if (allSectionChunks.length > 0 && allSectionChunks[0].chunks.length > 0) {
+      const firstSection = allSectionChunks[0];
+      sampleChunks.push({
+        location: `${firstSection.section.number || 'Section 1'} ${firstSection.section.heading} - Chunk 1`,
+        ...firstSection.chunks[0]
+      });
+    }
+
+    let samplesText = `SAMPLE CHUNKS FOR INSPECTION\n`;
+    samplesText += `${'='.repeat(80)}\n\n`;
+
+    sampleChunks.forEach((sample, i) => {
+      samplesText += `${'='.repeat(80)}\n`;
+      samplesText += `SAMPLE ${i + 1}: ${sample.location}\n`;
+      samplesText += `Tokens: ${sample.tokenCount}\n`;
+      samplesText += `${'='.repeat(80)}\n\n`;
+
+      samplesText += `RETRIEVAL FORMAT (for embedding/search):\n`;
+      samplesText += `${'-'.repeat(80)}\n`;
+      samplesText += sample.retrievalText + '\n\n';
+
+      samplesText += `GENERATION FORMAT (for LLM context):\n`;
+      samplesText += `${'-'.repeat(80)}\n`;
+      samplesText += sample.generationText + '\n\n\n';
+    });
+
+    fs.writeFileSync(`${articleDir}/SAMPLES.txt`, samplesText);
+    console.log(`  ✓ SAMPLES.txt (${sampleChunks.length} sample chunks)`);
+
+    const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
+
+    console.log('\n' + '='.repeat(80));
+    console.log('SUCCESS!');
+    console.log('='.repeat(80));
+    console.log(`\nProcessed ${article.title} in ${elapsedTime}s`);
+    console.log(`Output directory: ${articleDir}`);
+    console.log(`\nFiles created:`);
+    console.log(`  • metadata.json - Article metadata and statistics`);
+    console.log(`  • complete.json - All chunks in one file`);
+    console.log(`  • preamble.json - Preamble chunks`);
+    console.log(`  • section_*.json - Individual section chunks`);
+    console.log(`  • SUMMARY.txt - Human-readable summary`);
+    console.log(`  • SAMPLES.txt - Sample chunks for inspection\n`);
 
   } catch (error) {
-    console.error('\n=== Error during processing ===');
+    console.error('\n' + '='.repeat(80));
+    console.error('ERROR DURING PROCESSING');
+    console.error('='.repeat(80));
     console.error(error);
     process.exit(1);
   }
 }
 
-runTests();
+// Run test with configured article
+testArticleProcessing(TEST_ARTICLE_ID);
