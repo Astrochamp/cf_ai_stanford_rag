@@ -1,0 +1,39 @@
+/* Import Google Fonts first */
+@import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,300;0,400;0,600;0,700;1,400&family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* Tailwind imports */
+@import 'tailwindcss';
+@plugin '@tailwindcss/typography';
+
+@theme {
+  /* Custom font families */
+  --font-family-serif: 'Crimson Pro', 'Georgia', serif;
+  --font-family-sans: 'Inter', system-ui, sans-serif;
+}
+
+/* Apply serif font to body and specific elements */
+body {
+  font-family: var(--font-family-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.font-serif {
+  font-family: var(--font-family-serif);
+}
+
+/* Typography plugin prose customization for better readability */
+.prose {
+  font-family: var(--font-family-sans);
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Custom kbd styling */
+kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.875em;
+}

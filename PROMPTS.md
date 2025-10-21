@@ -56,3 +56,11 @@ Look closely at the script. Without changing any of the functionality, tidy up t
 
 Before you start making changes, clearly set out exactly what it is that you will modify, perhaps using todos. Stick to this list while making changes.
 ```
+
+```
+Create a single-page static site (connecting to external API) for an unofficial RAG system for the Stanford Encyclopedia of Philosophy. Use TypeScript, Tailwind, and Tailwind Typography (https://raw.githubusercontent.com/tailwindlabs/tailwindcss-typography/refs/heads/main/README.md) where relevant. Adopt a clean, classy, stylish design with serif or slab serif fonts. The site is called SEP Oracle. Use placeholders for the API calls for now.
+```
+
+```
+Add a dark theme with a toggle (set initial state based on default browser preference, save chosen state in localStorage)
+```
