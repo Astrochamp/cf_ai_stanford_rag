@@ -10,6 +10,7 @@
     "@types/node": "^24.7.2",
     "cheerio": "^1.1.2",
     "dotenv": "^17.2.3",
+    "express": "^5.1.0",
     "gpt-tokenizer": "^3.2.0",
     "html-entities": "^2.6.0",
     "katex": "^0.16.25",

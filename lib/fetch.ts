@@ -14,8 +14,8 @@ export async function fetchArticlesList(): Promise<ArticleID[]> {
   const $ = cheerio.load(text);
   const articleIDs: ArticleID[] = [];
 
-  // More specific selector - target links that contain '/entries/' in href
-  $('a[href*="/entries/"]').each((_, element) => {
+  // Target links within div#content that contain '/entries/' in href
+  $('#content a[href*="/entries/"]').each((_, element) => {
     const href = $(element).attr('href');
     if (!href || !href.includes('/entries/')) return;
 

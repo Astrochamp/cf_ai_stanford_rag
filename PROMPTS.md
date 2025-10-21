@@ -64,3 +64,19 @@ Create a single-page static site (connecting to external API) for an unofficial 
 ```
 Add a dark theme with a toggle (set initial state based on default browser preference, save chosen state in localStorage)
 ```
+
+```
+Write a function for embedding text (array of strings) using the following info:
+
+curl example: ...
+input schema: ...
+output schema: ...
+```
+
+```
+Add functions for reranking chunks against a query using `@cf/baai/bge-reranker-base`, based on the following info:
+
+curl example: ...
+input schema: ...
+output schema: ...
+```
