@@ -1,9 +1,9 @@
 CREATE TABLE IF NOT EXISTS articles (
   article_id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
-  author TEXT,
-  created INTEGER NOT NULL, -- unix timestamp
-  updated INTEGER NOT NULL  -- unix timestamp
+  authors TEXT, -- semicolon-separated list of authors (usually in Last, First format)
+  created TEXT NOT NULL, -- YYYY-MM-DD format
+  updated TEXT NOT NULL -- YYYY-MM-DD format
 );
 
 CREATE TABLE IF NOT EXISTS sections (
@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS chunks (
   section_id TEXT NOT NULL,
   chunk_index INTEGER NOT NULL, -- scoped to section
   chunk_text TEXT NOT NULL,
+  r2_url TEXT,
   FOREIGN KEY (section_id) REFERENCES sections(section_id) ON DELETE CASCADE,
   UNIQUE(section_id, chunk_index)
 );

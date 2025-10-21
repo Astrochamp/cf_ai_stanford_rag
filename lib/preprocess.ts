@@ -31,7 +31,7 @@ const openai = process.env.OPENAI_API_KEY ? new OpenAI({
 /**
  * Mapping of Roman numerals to their integer values.
  */
-export const ROMAN_MAP: Record<string, number> = {
+const ROMAN_MAP: Record<string, number> = {
   M: 1000, CM: 900, D: 500, CD: 400,
   C: 100, XC: 90, L: 50, XL: 40,
   X: 10, IX: 9, V: 5, IV: 4, I: 1
@@ -41,7 +41,7 @@ export const ROMAN_MAP: Record<string, number> = {
  * Convert a number to Roman numeral representation.
  * Standard Roman numerals are for positive integers in the range 1-3999.
  */
-export function toRoman(num: number): string {
+function toRoman(num: number): string {
   if (num < 1 || num > 3999 || !Number.isInteger(num)) {
     return num.toString();
   }
@@ -61,7 +61,7 @@ export function toRoman(num: number): string {
  * Convert a number to alphabetic representation (1=A, 2=B, ..., 26=Z, 27=AA, etc.).
  * Adjusts for 1-based indexing to 0-based for character codes.
  */
-export function toAlphabet(num: number): string {
+function toAlphabet(num: number): string {
   if (num < 1 || !Number.isInteger(num)) {
     return num.toString();
   }
@@ -78,7 +78,7 @@ export function toAlphabet(num: number): string {
 /**
  * Process nested list content by replacing placeholder markers with properly indented text.
  */
-export function processNestedListContent(
+function processNestedListContent(
   contentWithPlaceholder: string,
   keepMarkers: boolean,
   hasMainText: boolean
@@ -114,7 +114,7 @@ export function processNestedListContent(
 // HTML LIST PROCESSING
 // ============================================================================
 
-export function htmlListToTextList(htmlString: string, keepMarkers: boolean = true): string {
+function htmlListToTextList(htmlString: string, keepMarkers: boolean = true): string {
 
   const $ = cheerio.load(htmlString);
 
@@ -268,7 +268,7 @@ export function htmlListToTextList(htmlString: string, keepMarkers: boolean = tr
 // TEX & TEXT NORMALIZATION
 // ============================================================================
 
-export function replaceTexWithSymbols(text: string): string {
+function replaceTexWithSymbols(text: string): string {
   const texMap = texToUnicodeMap as Record<string, string>;
   const texSymbolRegex = /\\([a-zA-Z]+)/g;
   const remainingTexRegex = /\\/;
@@ -308,7 +308,7 @@ export function replaceTexWithSymbols(text: string): string {
  * Call GPT API with a prompt and return the response text.
  * Handles API errors gracefully by returning fallback text.
  */
-export async function callGPTAPI(prompt: string, fallbackText: string, logMessage: string): Promise<string> {
+async function callGPTAPI(prompt: string, fallbackText: string, logMessage: string): Promise<string> {
   if (!openai) {
     return fallbackText;
   }
@@ -338,7 +338,7 @@ export async function callGPTAPI(prompt: string, fallbackText: string, logMessag
  * Batch process multiple GPT API calls in parallel.
  * Returns results in the same order as inputs.
  */
-export async function batchGPTCalls<T>(
+async function batchGPTCalls<T>(
   items: T[],
   createPrompt: (item: T) => { prompt: string; fallback: string; },
   logPrefix: string = "Processing"
@@ -372,7 +372,7 @@ export async function batchGPTCalls<T>(
   return Promise.all(promises);
 }
 
-export async function gptConvertTexToText(text: string, articleTitle = "", sectionHeading = ""): Promise<string> {
+async function gptConvertTexToText(text: string, articleTitle = "", sectionHeading = ""): Promise<string> {
   const contextParts = [];
   contextParts.push("Stanford Encyclopedia of Philosophy");
   if (articleTitle) contextParts.push(articleTitle);
@@ -416,7 +416,7 @@ ${text}
 /**
  * Batch process multiple TeX conversions in parallel.
  */
-export async function batchConvertTexToText(
+async function batchConvertTexToText(
   texts: string[],
   articleTitle = "",
   sectionHeading = ""
@@ -468,7 +468,7 @@ ${text}
   );
 }
 
-export async function gptCreateTableDescription(tableElem: string, articleTitle = "", sectionHeading = ""): Promise<string> {
+async function gptCreateTableDescription(tableElem: string, articleTitle = "", sectionHeading = ""): Promise<string> {
   const contextParts = [];
   contextParts.push("Stanford Encyclopedia of Philosophy");
   if (articleTitle) contextParts.push(articleTitle);
@@ -519,7 +519,7 @@ ${tableElem}
 /**
  * Batch process multiple table descriptions in parallel.
  */
-export async function batchCreateTableDescriptions(
+async function batchCreateTableDescriptions(
   tables: string[],
   articleTitle = "",
   sectionHeading = ""
@@ -576,7 +576,7 @@ ${tableElem}
   );
 }
 
-export async function processTex(text: string, forRetrieval: boolean = true): Promise<string> {
+async function processTex(text: string, forRetrieval: boolean = true): Promise<string> {
   const replacedText = replaceTexWithSymbols(text);
   if (TEX_PATTERN.test(replacedText)) {
     if (forRetrieval) {
@@ -591,7 +591,7 @@ export async function processTex(text: string, forRetrieval: boolean = true): Pr
   }
 }
 
-export function convertTableToMarkdown(tableHtml: string): string {
+function convertTableToMarkdown(tableHtml: string): string {
   const $ = cheerio.load(tableHtml);
   const $table = $('table').first();
 
@@ -653,7 +653,7 @@ export function convertTableToMarkdown(tableHtml: string): string {
 // TABLE CONVERSION
 // ============================================================================
 
-export async function convertTablesToDescriptions(text: string, articleTitle = "", sectionHeading = ""): Promise<string> {
+async function convertTablesToDescriptions(text: string, articleTitle = "", sectionHeading = ""): Promise<string> {
   const tables = text.match(TABLE_REGEX);
 
   if (!tables || tables.length === 0) {
@@ -673,7 +673,7 @@ export async function convertTablesToDescriptions(text: string, articleTitle = "
   return processedText;
 }
 
-export function convertTablesToMarkdown(text: string): string {
+function convertTablesToMarkdown(text: string): string {
   const tables = text.match(TABLE_REGEX);
 
   if (!tables || tables.length === 0) {
@@ -694,7 +694,7 @@ export function convertTablesToMarkdown(text: string): string {
 // HTML TAG STRIPPING
 // ============================================================================
 
-export function stripHTMLTags(html: string): string {
+function stripHTMLTags(html: string): string {
   const PRESERVE_TAGS = new Set(['figure', 'figcaption']);
   const REMOVE_WITH_CONTENT = new Set(['script', 'style', 'iframe', 'noscript']);
   const PARAGRAPH_TAGS = new Set(['p', 'div', 'blockquote', 'li', 'pre']);
@@ -777,7 +777,7 @@ export function extractFigureIds(html: string): Set<string> {
  * Extract the best available description for a figure.
  * Priority: extended description > short caption > alt text
  */
-export function extractFigureDescription(
+function extractFigureDescription(
   $figure: cheerio.Cheerio<any>,
   figId: string | undefined,
   extendedDescriptions: Map<string, string>,
@@ -953,7 +953,7 @@ export async function processArticleSectionDual(
 /**
  * Split HTML into semantic items (paragraphs, lists, tables, figures, etc.)
  */
-export function splitHtmlIntoItems(html: string): SectionItem[] {
+function splitHtmlIntoItems(html: string): SectionItem[] {
   const items: SectionItem[] = [];
   // Wrap the fragment so we can reliably iterate top-level nodes
   const $ = cheerio.load(`<div id="__root__">${html}</div>`);
@@ -1062,7 +1062,7 @@ export function splitHtmlIntoItems(html: string): SectionItem[] {
  * @param sectionHeading - Heading of the section (for table context)
  * @returns Object with retrieval and generation text
  */
-export async function preprocessItemDual(item: SectionItem, articleTitle: string, sectionHeading: string): Promise<{ retrieval: string; generation: string; }> {
+async function preprocessItemDual(item: SectionItem, articleTitle: string, sectionHeading: string): Promise<{ retrieval: string; generation: string; }> {
   const { kind, html } = item;
 
   // Helpers to normalize whitespace at the end for consistency
@@ -1188,7 +1188,7 @@ export async function preprocessItemDual(item: SectionItem, articleTitle: string
  * @param sectionHeading - Heading of the section (for table context)
  * @returns Array of dual-format results in the same order as input items
  */
-export async function batchPreprocessItemsDual(
+async function batchPreprocessItemsDual(
   items: SectionItem[],
   articleTitle: string,
   sectionHeading: string

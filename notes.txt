@@ -21,3 +21,19 @@ LLM generation: 5 parent sections in rich format
 Chunk size: <= 1024 (semantic chunking)
 BM25: b=0.85, k1=1.6
 
+===
+
+SEP Oracle
+
+initial setup, per article:
+1. fetch article
+2. preprocess and chunk (two formats: retrieval & generation)
+3. store retrieval format in D1
+4. store generation format in R2
+5. vectorise retrieval format chunks & store in Vectorize
+
+to answer user query:
+1. query Vectorize
+2. embed query and search D1 with BM25
+3. unify top-K with RRF and rerank
+4. dedupe chunks then grab top N chunks + their immediate neighbours (max ~8k tokens)

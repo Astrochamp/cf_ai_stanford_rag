@@ -133,6 +133,9 @@ export async function fetchArticleContent(id: ArticleID): Promise<Article> {
   const $ = cheerio.load(text);
 
   const title = $('meta[name="DC.title"]').attr('content') || 'No Title';
+  const createdDate = $('meta[name="DCTERMS.issued"]').attr('content') || '';
+  const updatedDate = $('meta[name="DCTERMS.modified"]').attr('content') || '';
+
   const originalTitle = title;
 
   const authors: string[] = [];
@@ -151,9 +154,6 @@ export async function fetchArticleContent(id: ArticleID): Promise<Article> {
     const numberMatch = fullHeading.match(/^([\d.]+)\s+/);
     const number = numberMatch ? numberMatch[1].trim().replace(/\.$/, "") : '';
     const heading = number ? fullHeading.slice(number.length).replace(/^\./, "").trim() : fullHeading;
-
-    // shortName = element id
-    const shortName = $(element).attr('id') || '';
 
     let content = '';
     let nextSibling = (element as any).nextSibling;
@@ -185,7 +185,6 @@ export async function fetchArticleContent(id: ArticleID): Promise<Article> {
     if (!content.trim()) return;
 
     sections.push({
-      shortName,
       number,
       heading,
       content
@@ -216,6 +215,8 @@ export async function fetchArticleContent(id: ArticleID): Promise<Article> {
     authors,
     preamble: processedPreamble,
     sections: processedSections,
-    related
+    related,
+    created: createdDate,
+    updated: updatedDate
   };
 }

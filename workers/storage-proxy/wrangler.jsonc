@@ -17,7 +17,14 @@
 			"database_id": "19f5ad99-7539-4ccc-a659-0ba1277aae5d",
 			"remote": true
 		}
-	]
+	],
+  "r2_buckets": [
+    {
+      "binding": "r2",
+      "bucket_name": "sep-articles",
+      "remote": true
+    }
+  ]
 	/**
 	 * Smart Placement
 	 * Docs: https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement

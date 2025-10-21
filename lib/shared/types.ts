@@ -5,7 +5,6 @@
 export type ArticleID = string & { __id: true; };
 
 export type ArticleSection = {
-  shortName: string; // e.g. ReleConnLogi
   number: string; // 3.3
   heading: string; // Relevance and connexive logics
   content: string; // raw HTML content of the section
@@ -19,6 +18,8 @@ export type Article = {
   preamble: string; // raw HTML content of the preamble
   sections: ArticleSection[];
   related: ArticleID[];
+  created: string; // YYYY-MM-DD format
+  updated: string; // YYYY-MM-DD format
 };
 
 export type ProcessedChunk = {
@@ -32,4 +33,42 @@ export type ItemKind = 'paragraph' | 'list' | 'table' | 'pre' | 'blockquote' | '
 export type SectionItem = {
   kind: ItemKind;
   html: string; // raw HTML for the item
+};
+
+// ============================================================================
+// DATABASE SCHEMA TYPES
+// ============================================================================
+
+export type DBArticle = {
+  article_id: string;
+  title: string;
+  authors: string | null;
+  created: string; // YYYY-MM-DD format
+  updated: string; // YYYY-MM-DD format
+};
+
+export type DBSection = {
+  section_id: string; // format: article-id/a.b.c
+  article_id: string;
+  number: string; // a.b.c format
+  heading: string | null;
+  num_chunks: number;
+};
+
+export type DBChunk = {
+  chunk_id: string;
+  section_id: string;
+  chunk_index: number; // scoped to section
+  chunk_text: string;
+  r2_url: string | null;
+};
+
+export type IngestionStatus = 'pending' | 'processing' | 'completed' | 'failed';
+
+export type DBIngestionQueue = {
+  article_id: string;
+  status: IngestionStatus;
+  retry_count: number;
+  last_attempt: number | null; // unix timestamp
+  error_message: string | null;
 };
