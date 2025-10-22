@@ -4,6 +4,7 @@ import * as jose from 'jose';
 
 export interface Env {
   d1: D1Database;
+  r2: R2Bucket;
   JWT_PUBLIC_KEY: string; // RS256 public key in PEM format (for verifying incoming requests)
   JWT_AUDIENCE: string; // expected audience claim (for incoming requests)
   WORKER_PRIVATE_KEY: string; // RS256 private key in PEM format (for signing outgoing requests)
@@ -129,6 +130,288 @@ async function simpleSearchChunks(env: Env, searchQuery: string, limit: number =
   return results;
 }
 
+/**
+ * R2 Proxy Functions
+ */
+
+async function handleR2Get(env: Env, key: string): Promise<Response> {
+  const object = await env.r2.get(key);
+
+  if (object === null) {
+    return new Response(JSON.stringify({ error: 'Object not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set('etag', object.httpEtag);
+
+  return new Response(object.body, {
+    headers,
+  });
+}
+
+async function handleR2Put(env: Env, key: string, request: Request): Promise<Response> {
+  const body = await request.arrayBuffer();
+
+  const metadata: Record<string, string> = {};
+  const customMetadataPrefix = 'x-r2-metadata-';
+  request.headers.forEach((value, key) => {
+    if (key.toLowerCase().startsWith(customMetadataPrefix)) {
+      const metaKey = key.substring(customMetadataPrefix.length);
+      metadata[metaKey] = value;
+    }
+  });
+
+  const httpMetadata: R2HTTPMetadata = {};
+  const contentType = request.headers.get('content-type');
+  if (contentType) {
+    httpMetadata.contentType = contentType;
+  }
+
+  await env.r2.put(key, body, {
+    httpMetadata,
+    customMetadata: metadata,
+  });
+
+  return new Response(JSON.stringify({ success: true, key }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+async function handleR2Delete(env: Env, key: string): Promise<Response> {
+  await env.r2.delete(key);
+
+  return new Response(JSON.stringify({ success: true, key }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+async function handleR2List(env: Env, url: URL): Promise<Response> {
+  const prefix = url.searchParams.get('prefix') || undefined;
+  const limit = parseInt(url.searchParams.get('limit') || '1000');
+  const cursor = url.searchParams.get('cursor') || undefined;
+
+  const listed = await env.r2.list({
+    prefix,
+    limit,
+    cursor,
+  });
+
+  const response: any = {
+    objects: listed.objects.map(obj => ({
+      key: obj.key,
+      size: obj.size,
+      etag: obj.etag,
+      uploaded: obj.uploaded,
+      httpEtag: obj.httpEtag,
+    })),
+    truncated: listed.truncated,
+  };
+
+  // Add cursor if available (only present when truncated)
+  if ('cursor' in listed && listed.cursor) {
+    response.cursor = listed.cursor;
+  }
+
+  return new Response(JSON.stringify(response), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+async function handleR2Head(env: Env, key: string): Promise<Response> {
+  const object = await env.r2.head(key);
+
+  if (object === null) {
+    return new Response(JSON.stringify({ error: 'Object not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  return new Response(JSON.stringify({
+    key: object.key,
+    size: object.size,
+    etag: object.etag,
+    httpEtag: object.httpEtag,
+    uploaded: object.uploaded,
+    httpMetadata: object.httpMetadata,
+    customMetadata: object.customMetadata,
+  }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+/**
+ * D1 Proxy Functions
+ */
+
+async function handleD1Query(env: Env, request: Request): Promise<Response> {
+  try {
+    const body = await request.json() as { query: string; params?: any[]; };
+
+    if (!body.query) {
+      return new Response(JSON.stringify({ error: 'Query is required' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    let stmt = env.d1.prepare(body.query);
+
+    if (body.params && body.params.length > 0) {
+      stmt = stmt.bind(...body.params);
+    }
+
+    const results = await stmt.all();
+
+    return new Response(JSON.stringify(results), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (error: any) {
+    return new Response(JSON.stringify({
+      error: 'Query execution failed',
+      message: error.message
+    }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+}
+
+async function handleD1Batch(env: Env, request: Request): Promise<Response> {
+  try {
+    const body = await request.json() as { queries: Array<{ query: string; params?: any[]; }>; };
+
+    if (!body.queries || !Array.isArray(body.queries)) {
+      return new Response(JSON.stringify({ error: 'Queries array is required' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    const statements = body.queries.map(q => {
+      let stmt = env.d1.prepare(q.query);
+      if (q.params && q.params.length > 0) {
+        stmt = stmt.bind(...q.params);
+      }
+      return stmt;
+    });
+
+    const results = await env.d1.batch(statements);
+
+    return new Response(JSON.stringify(results), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (error: any) {
+    return new Response(JSON.stringify({
+      error: 'Batch execution failed',
+      message: error.message
+    }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+}
+
+async function handleD1SearchChunks(env: Env, url: URL): Promise<Response> {
+  const query = url.searchParams.get('q');
+  const limit = parseInt(url.searchParams.get('limit') || '10');
+  const simple = url.searchParams.get('simple') === 'true';
+
+  if (!query) {
+    return new Response(JSON.stringify({ error: 'Query parameter "q" is required' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const results = simple
+    ? await simpleSearchChunks(env, query, limit)
+    : await searchChunks(env, query, limit);
+
+  return new Response(JSON.stringify(results), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+/**
+ * Router function to handle different endpoints
+ */
+async function handleRequest(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const path = url.pathname;
+  const method = request.method;
+
+  // R2 endpoints
+  if (path.startsWith('/r2/')) {
+    const key = path.substring(4); // Remove '/r2/' prefix
+
+    switch (method) {
+      case 'GET':
+        return handleR2Get(env, key);
+      case 'PUT':
+        return handleR2Put(env, key, request);
+      case 'DELETE':
+        return handleR2Delete(env, key);
+      case 'HEAD':
+        return handleR2Head(env, key);
+      default:
+        return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+          status: 405,
+          headers: { 'Content-Type': 'application/json' },
+        });
+    }
+  }
+
+  // R2 list endpoint
+  if (path === '/r2' && method === 'GET') {
+    return handleR2List(env, url);
+  }
+
+  // D1 endpoints
+  if (path === '/d1/query' && method === 'POST') {
+    return handleD1Query(env, request);
+  }
+
+  if (path === '/d1/batch' && method === 'POST') {
+    return handleD1Batch(env, request);
+  }
+
+  if (path === '/d1/search' && method === 'GET') {
+    return handleD1SearchChunks(env, url);
+  }
+
+  return new Response(JSON.stringify({
+    error: 'Not found',
+    availableEndpoints: {
+      r2: {
+        'GET /r2': 'List objects (query params: prefix, limit, cursor)',
+        'GET /r2/{key}': 'Get object',
+        'PUT /r2/{key}': 'Upload object',
+        'DELETE /r2/{key}': 'Delete object',
+        'HEAD /r2/{key}': 'Get object metadata',
+      },
+      d1: {
+        'POST /d1/query': 'Execute single query (body: {query, params})',
+        'POST /d1/batch': 'Execute batch queries (body: {queries: [{query, params}]})',
+        'GET /d1/search': 'Search chunks (query params: q, limit, simple)',
+      },
+    },
+  }), {
+    status: 404,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
 
 export default {
   async fetch(request, env, ctx): Promise<Response> {
@@ -137,6 +420,6 @@ export default {
       return authError;
     }
 
-    return new Response('Hello World!');
+    return handleRequest(request, env);
   },
 } satisfies ExportedHandler<Env>;
