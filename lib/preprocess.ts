@@ -2,7 +2,7 @@ import * as cheerio from 'cheerio';
 import 'dotenv/config';
 import { encode as tokenize } from 'gpt-tokenizer';
 import { decode as htmlDecode } from 'html-entities';
-import { OpenAI } from "openai";
+import OpenAI from 'openai';
 import texToUnicodeMap from '../data/tex-unicode-map.json';
 import { fetchExtendedFigureDescriptions } from './fetch';
 import {
@@ -20,9 +20,7 @@ import type {
 } from './shared/types';
 import { normaliseText, normaliseWhitespace } from './shared/utils';
 
-const openai = process.env.OPENAI_API_KEY ? new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-}) : null;
+
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -308,7 +306,7 @@ function replaceTexWithSymbols(text: string): string {
  * Call GPT API with a prompt and return the response text.
  * Handles API errors gracefully by returning fallback text.
  */
-async function callGPTAPI(prompt: string, fallbackText: string, logMessage: string): Promise<string> {
+async function callGPTAPI(prompt: string, openai: OpenAI, fallbackText: string, logMessage: string): Promise<string> {
   if (!openai) {
     return fallbackText;
   }
@@ -340,6 +338,7 @@ async function callGPTAPI(prompt: string, fallbackText: string, logMessage: stri
  */
 async function batchGPTCalls<T>(
   items: T[],
+  openai: OpenAI,
   createPrompt: (item: T) => { prompt: string; fallback: string; },
   logPrefix: string = "Processing"
 ): Promise<string[]> {
@@ -372,7 +371,7 @@ async function batchGPTCalls<T>(
   return Promise.all(promises);
 }
 
-async function gptConvertTexToText(text: string, articleTitle = "", sectionHeading = ""): Promise<string> {
+async function gptConvertTexToText(text: string, openai: OpenAI, articleTitle = "", sectionHeading = ""): Promise<string> {
   const contextParts = [];
   contextParts.push("Stanford Encyclopedia of Philosophy");
   if (articleTitle) contextParts.push(articleTitle);
@@ -410,7 +409,7 @@ ${text}
 
 **Converted Paragraph:**
 `;
-  return callGPTAPI(prompt, text, 'Calling GPT to convert TeX to natural language');
+  return callGPTAPI(prompt, openai, text, 'Calling GPT to convert TeX to natural language');
 };
 
 /**
@@ -418,6 +417,7 @@ ${text}
  */
 async function batchConvertTexToText(
   texts: string[],
+  openai: OpenAI,
   articleTitle = "",
   sectionHeading = ""
 ): Promise<string[]> {
@@ -429,6 +429,7 @@ async function batchConvertTexToText(
 
   return batchGPTCalls(
     texts,
+    openai,
     (text) => ({
       prompt: `# Task: Convert TeX to Natural Language
 Do NOT use ANY reasoning for this task! Terminate reasoning as soon as you begin.
@@ -468,7 +469,7 @@ ${text}
   );
 }
 
-async function gptCreateTableDescription(tableElem: string, articleTitle = "", sectionHeading = ""): Promise<string> {
+async function gptCreateTableDescription(tableElem: string, openai: OpenAI, articleTitle = "", sectionHeading = ""): Promise<string> {
   const contextParts = [];
   contextParts.push("Stanford Encyclopedia of Philosophy");
   if (articleTitle) contextParts.push(articleTitle);
@@ -513,7 +514,7 @@ ${tableElem}
 
 **Summary:**
 `;
-  return callGPTAPI(prompt, "", 'Calling GPT to generate table description');
+  return callGPTAPI(prompt, openai, "", 'Calling GPT to generate table description');
 };
 
 /**
@@ -521,6 +522,7 @@ ${tableElem}
  */
 async function batchCreateTableDescriptions(
   tables: string[],
+  openai: OpenAI,
   articleTitle = "",
   sectionHeading = ""
 ): Promise<string[]> {
@@ -532,6 +534,7 @@ async function batchCreateTableDescriptions(
 
   return batchGPTCalls(
     tables,
+    openai,
     (tableElem) => ({
       prompt: `# Task: Summarize HTML Table
 
@@ -576,12 +579,18 @@ ${tableElem}
   );
 }
 
-async function processTex(text: string, forRetrieval: boolean = true): Promise<string> {
+async function processTex(
+  text: string,
+  openai: OpenAI,
+  forRetrieval: boolean = true,
+  articleTitle: string = "",
+  sectionHeading: string = ""
+): Promise<string> {
   const replacedText = replaceTexWithSymbols(text);
   if (TEX_PATTERN.test(replacedText)) {
     if (forRetrieval) {
       // For retrieval, convert all TeX to natural language
-      return await gptConvertTexToText(replacedText);
+      return await gptConvertTexToText(replacedText, openai, articleTitle, sectionHeading);
     } else {
       // For generation, keep TeX in a readable format (already replaced symbols)
       return replacedText;
@@ -653,7 +662,7 @@ function convertTableToMarkdown(tableHtml: string): string {
 // TABLE CONVERSION
 // ============================================================================
 
-async function convertTablesToDescriptions(text: string, articleTitle = "", sectionHeading = ""): Promise<string> {
+async function convertTablesToDescriptions(text: string, openai: OpenAI, articleTitle = "", sectionHeading = ""): Promise<string> {
   const tables = text.match(TABLE_REGEX);
 
   if (!tables || tables.length === 0) {
@@ -663,7 +672,7 @@ async function convertTablesToDescriptions(text: string, articleTitle = "", sect
   let processedText = text;
 
   for (const table of tables) {
-    const description = await gptCreateTableDescription(table, articleTitle, sectionHeading);
+    const description = await gptCreateTableDescription(table, openai, articleTitle, sectionHeading);
     if (description) {
       // Replace the table with a formatted description
       processedText = processedText.replace(table, `[Table: ${description}]`);
@@ -867,6 +876,7 @@ export async function processFiguresInContent(
 export async function processArticleSectionDual(
   section: ArticleSection,
   articleTitle: string,
+  openai: OpenAI,
   maxTokens: number = 1024
 ): Promise<ProcessedChunk[]> {
   const sectionHeading = section.number ? `${section.number} ${section.heading}` : section.heading;
@@ -875,7 +885,7 @@ export async function processArticleSectionDual(
   const items = splitHtmlIntoItems(section.content);
 
   // Convert all items to dual formats (retrieval/generation) in parallel
-  const dualResults = await batchPreprocessItemsDual(items, articleTitle, sectionHeading);
+  const dualResults = await batchPreprocessItemsDual(items, articleTitle, sectionHeading, openai);
 
   // Extract aligned retrieval and generation units
   const retrievalUnits: string[] = [];
@@ -1062,7 +1072,7 @@ function splitHtmlIntoItems(html: string): SectionItem[] {
  * @param sectionHeading - Heading of the section (for table context)
  * @returns Object with retrieval and generation text
  */
-async function preprocessItemDual(item: SectionItem, articleTitle: string, sectionHeading: string): Promise<{ retrieval: string; generation: string; }> {
+async function preprocessItemDual(item: SectionItem, articleTitle: string, sectionHeading: string, openai: OpenAI): Promise<{ retrieval: string; generation: string; }> {
   const { kind, html } = item;
 
   // Helpers to normalize whitespace at the end for consistency
@@ -1081,8 +1091,8 @@ async function preprocessItemDual(item: SectionItem, articleTitle: string, secti
     g = stripHTMLTags(g);
 
     r = normaliseText(r);
-    r = await processTex(r, true);
-    g = await processTex(g, false);
+    r = await processTex(r, openai, true, articleTitle, sectionHeading);
+    g = await processTex(g, openai, false, articleTitle, sectionHeading);
 
     return { retrieval: finalize(r), generation: finalize(g) };
   }
@@ -1094,7 +1104,7 @@ async function preprocessItemDual(item: SectionItem, articleTitle: string, secti
     const tableHtml = $table.length > 0 ? $.html($table) : html;
 
     // Retrieval: GPT description (fallback to markdown -> plain text)
-    let rDesc = await gptCreateTableDescription(tableHtml, articleTitle, sectionHeading);
+    let rDesc = await gptCreateTableDescription(tableHtml, openai, articleTitle, sectionHeading);
     if (!rDesc) {
       // Fallback: markdown then strip to text
       const md = convertTableToMarkdown(tableHtml);
@@ -1105,8 +1115,8 @@ async function preprocessItemDual(item: SectionItem, articleTitle: string, secti
 
     // Process TeX
     let r = normaliseText(rDesc);
-    r = await processTex(r, true);
-    let g = await processTex(gMd, false);
+    r = await processTex(r, openai, true, articleTitle, sectionHeading);
+    let g = await processTex(gMd, openai, false, articleTitle, sectionHeading);
 
     return { retrieval: finalize(r), generation: finalize(g) };
   }
@@ -1150,8 +1160,8 @@ async function preprocessItemDual(item: SectionItem, articleTitle: string, secti
     const gRaw = captionText ? `[Figure: ${captionText}]` : '[Figure]';
 
     let r = normaliseText(rRaw);
-    r = await processTex(r, true);
-    let g = await processTex(gRaw, false);
+    r = await processTex(r, openai, true, articleTitle, sectionHeading);
+    let g = await processTex(gRaw, openai, false, articleTitle, sectionHeading);
 
     return { retrieval: finalize(r), generation: finalize(g) };
   }
@@ -1161,8 +1171,8 @@ async function preprocessItemDual(item: SectionItem, articleTitle: string, secti
     let r = stripHTMLTags(html);
     let g = r; // identical content for generation
     r = normaliseText(r);
-    r = await processTex(r, true);
-    g = await processTex(g, false);
+    r = await processTex(r, openai, true, articleTitle, sectionHeading);
+    g = await processTex(g, openai, false, articleTitle, sectionHeading);
     return { retrieval: finalize(r), generation: finalize(g) };
   }
 
@@ -1172,8 +1182,8 @@ async function preprocessItemDual(item: SectionItem, articleTitle: string, secti
     let g = r; // same textual content, different TeX/diacritics handling below
 
     r = normaliseText(r);
-    r = await processTex(r, true);
-    g = await processTex(g, false);
+    r = await processTex(r, openai, true, articleTitle, sectionHeading);
+    g = await processTex(g, openai, false, articleTitle, sectionHeading);
 
     return { retrieval: finalize(r), generation: finalize(g) };
   }
@@ -1191,7 +1201,8 @@ async function preprocessItemDual(item: SectionItem, articleTitle: string, secti
 async function batchPreprocessItemsDual(
   items: SectionItem[],
   articleTitle: string,
-  sectionHeading: string
+  sectionHeading: string,
+  openai: OpenAI
 ): Promise<{ retrieval: string; generation: string; }[]> {
   if (items.length === 0) {
     return [];
@@ -1318,7 +1329,7 @@ async function batchPreprocessItemsDual(
   // Phase 2: Batch process all tables in parallel
   if (tablesToProcess.length > 0) {
     const tableHtmls = tablesToProcess.map(t => t.html);
-    const tableDescriptions = await batchCreateTableDescriptions(tableHtmls, articleTitle, sectionHeading);
+    const tableDescriptions = await batchCreateTableDescriptions(tableHtmls, openai, articleTitle, sectionHeading);
 
     for (let i = 0; i < tablesToProcess.length; i++) {
       const { index } = tablesToProcess[i];
@@ -1347,7 +1358,7 @@ async function batchPreprocessItemsDual(
 
   if (texConversionsNeeded.length > 0) {
     const texInputs = texConversionsNeeded.map(p => p.retrieval);
-    const texOutputs = await batchConvertTexToText(texInputs, articleTitle, sectionHeading);
+    const texOutputs = await batchConvertTexToText(texInputs, openai, articleTitle, sectionHeading);
 
     for (let i = 0; i < texConversionsNeeded.length; i++) {
       const preparedIndex = prepared.findIndex(p => p.index === texConversionsNeeded[i].index);

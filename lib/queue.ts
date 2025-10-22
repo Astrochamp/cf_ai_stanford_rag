@@ -4,10 +4,12 @@ import { executeD1Query } from './worker-api';
 /**
  * Add article to ingestion queue
  */
-export async function addToIngestionQueue(articleId: string): Promise<void> {
+export async function addToIngestionQueue(articleId: string, dbWorkerUrl: string, privateKeyPem: string): Promise<void> {
   await executeD1Query(
     `INSERT OR IGNORE INTO ingestion_queue (article_id, status, retry_count)
      VALUES (?, 'pending', 0)`,
+    dbWorkerUrl,
+    privateKeyPem,
     [articleId]
   );
 }
@@ -18,6 +20,8 @@ export async function addToIngestionQueue(articleId: string): Promise<void> {
 export async function updateIngestionStatus(
   articleId: string,
   status: IngestionStatus,
+  dbWorkerUrl: string,
+  privateKeyPem: string,
   errorMessage?: string
 ): Promise<void> {
   const now = Date.now();
@@ -27,6 +31,8 @@ export async function updateIngestionStatus(
       `UPDATE ingestion_queue
        SET status = ?, last_attempt = ?, error_message = ?, retry_count = retry_count + 1
        WHERE article_id = ?`,
+      dbWorkerUrl,
+      privateKeyPem,
       [status, now, errorMessage, articleId]
     );
   } else {
@@ -34,6 +40,8 @@ export async function updateIngestionStatus(
       `UPDATE ingestion_queue
        SET status = ?, last_attempt = ?, error_message = NULL
        WHERE article_id = ?`,
+      dbWorkerUrl,
+      privateKeyPem,
       [status, now, articleId]
     );
   }
@@ -42,12 +50,14 @@ export async function updateIngestionStatus(
 /**
  * Get the next pending article from the ingestion queue
  */
-export async function getNextPendingArticle(): Promise<string | null> {
+export async function getNextPendingArticle(dbWorkerUrl: string, privateKeyPem: string): Promise<string | null> {
   const result = await executeD1Query(
     `SELECT article_id FROM ingestion_queue
      WHERE status IN ('pending', 'failed')
      ORDER BY last_attempt ASC NULLS FIRST
-     LIMIT 1`
+     LIMIT 1`,
+    dbWorkerUrl,
+    privateKeyPem
   );
 
   if (result.results && result.results.length > 0) {
@@ -59,11 +69,13 @@ export async function getNextPendingArticle(): Promise<string | null> {
 /**
  * Get ingestion queue statistics
  */
-export async function getQueueStats(): Promise<Record<string, number>> {
+export async function getQueueStats(dbWorkerUrl: string, privateKeyPem: string): Promise<Record<string, number>> {
   const result = await executeD1Query(
     `SELECT status, COUNT(*) as count
      FROM ingestion_queue
-     GROUP BY status`
+     GROUP BY status`,
+    dbWorkerUrl,
+    privateKeyPem
   );
 
   const stats: Record<string, number> = {

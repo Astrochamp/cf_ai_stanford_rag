@@ -15,20 +15,21 @@
 			"binding": "d1",
 			"database_name": "sep-rag",
 			"database_id": "19f5ad99-7539-4ccc-a659-0ba1277aae5d",
-			"remote": true
+			"remote": false
 		}
 	],
   "r2_buckets": [
     {
       "binding": "r2",
       "bucket_name": "sep-articles",
-      "remote": true
+      "remote": false
     }
   ],
 	"vectorize": [
 	  {
 	    "binding": "vectorize",
-	    "index_name": "sep-index-1024-dp"
+	    "index_name": "sep-index-1024-dp",
+      "remote": false
 	  }
 	],
 	/**

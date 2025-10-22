@@ -1,3 +1,4 @@
+import OpenAI from 'openai';
 import { fetchArticleContent } from './fetch';
 import { processArticleSectionDual } from './preprocess';
 import { getNextPendingArticle, updateIngestionStatus } from './queue';
@@ -9,12 +10,19 @@ const MAX_TOKENS_PER_CHUNK = 1024;
 /**
  * Complete article processing pipeline
  */
-export async function processAndStoreArticle(articleId: string): Promise<void> {
+export async function processAndStoreArticle(
+  articleId: string,
+  dbWorkerUrl: string,
+  privateKeyPem: string,
+  accountId: string,
+  apiToken: string,
+  openai: OpenAI
+): Promise<void> {
   console.log(`Starting processing for article: ${articleId}`);
 
   try {
     // Update status to processing
-    await updateIngestionStatus(articleId, 'processing');
+    await updateIngestionStatus(articleId, 'processing', dbWorkerUrl, privateKeyPem);
 
     // Step 1: Fetch article
     console.log('Step 1: Fetching article...');
@@ -30,7 +38,7 @@ export async function processAndStoreArticle(articleId: string): Promise<void> {
 
     // Step 2: Store article metadata
     console.log('Step 2: Storing article metadata...');
-    await storeArticleMetadata(dbArticle);
+    await storeArticleMetadata(dbArticle, dbWorkerUrl, privateKeyPem);
 
     // Step 3: Process preamble (always keep as single chunk)
     console.log('Step 3: Processing preamble...');
@@ -41,6 +49,7 @@ export async function processAndStoreArticle(articleId: string): Promise<void> {
         content: article.preamble
       },
       article.title,
+      openai,
       Infinity // Use Infinity to ensure preamble is never split
     );
 
@@ -52,7 +61,7 @@ export async function processAndStoreArticle(articleId: string): Promise<void> {
       number: '0',
       heading: 'Preamble',
       num_chunks: preambleChunks.length
-    });
+    }, dbWorkerUrl, privateKeyPem);
 
     // Store preamble chunks
     const preambleDbChunks: DBChunk[] = preambleChunks.map((chunk, index) => ({
@@ -64,7 +73,7 @@ export async function processAndStoreArticle(articleId: string): Promise<void> {
     }));
 
     const preambleGenerationTexts = preambleChunks.map(c => c.generationText);
-    await storeChunksBatch(preambleDbChunks, preambleGenerationTexts);
+    await storeChunksBatch(preambleDbChunks, preambleGenerationTexts, dbWorkerUrl, privateKeyPem);
 
     // Step 4: Process all sections
     console.log('Step 4: Processing sections...');
@@ -85,6 +94,7 @@ export async function processAndStoreArticle(articleId: string): Promise<void> {
       const chunks = await processArticleSectionDual(
         section,
         article.title,
+        openai,
         MAX_TOKENS_PER_CHUNK
       );
 
@@ -96,7 +106,7 @@ export async function processAndStoreArticle(articleId: string): Promise<void> {
         number: section.number,
         heading: section.heading || null,
         num_chunks: chunks.length
-      });
+      }, dbWorkerUrl, privateKeyPem);
 
       // Prepare chunk data
       const dbChunks: DBChunk[] = chunks.map((chunk, index) => ({
@@ -110,7 +120,7 @@ export async function processAndStoreArticle(articleId: string): Promise<void> {
       const generationTexts = chunks.map(c => c.generationText);
 
       // Store chunks
-      await storeChunksBatch(dbChunks, generationTexts);
+      await storeChunksBatch(dbChunks, generationTexts, dbWorkerUrl, privateKeyPem);
 
       // Add to vectorization queue
       dbChunks.forEach(chunk => {
@@ -123,16 +133,16 @@ export async function processAndStoreArticle(articleId: string): Promise<void> {
 
     // Step 5: Generate and store embeddings
     console.log('Step 5: Generating embeddings...');
-    await vectorizeChunks(allChunksForVectorization);
+    await vectorizeChunks(allChunksForVectorization, dbWorkerUrl, privateKeyPem, accountId, apiToken);
 
     // Update status to completed
-    await updateIngestionStatus(articleId, 'completed');
+    await updateIngestionStatus(articleId, 'completed', dbWorkerUrl, privateKeyPem);
     console.log(`✓ Article ${articleId} processed successfully`);
 
   } catch (error) {
     console.error(`Error processing article ${articleId}:`, error);
     const errorMessage = error instanceof Error ? error.message : String(error);
-    await updateIngestionStatus(articleId, 'failed', errorMessage);
+    await updateIngestionStatus(articleId, 'failed', dbWorkerUrl, privateKeyPem, errorMessage);
     throw error;
   }
 }
@@ -140,22 +150,28 @@ export async function processAndStoreArticle(articleId: string): Promise<void> {
 /**
  * Process all pending articles in the queue
  */
-export async function processIngestionQueue(): Promise<void> {
+export async function processIngestionQueue(
+  dbWorkerUrl: string,
+  privateKeyPem: string,
+  accountId: string,
+  apiToken: string,
+  openai: OpenAI
+): Promise<void> {
   console.log('Starting ingestion queue processing...');
 
-  let articleId = await getNextPendingArticle();
+  let articleId = await getNextPendingArticle(dbWorkerUrl, privateKeyPem);
   let processed = 0;
 
   while (articleId) {
     try {
-      await processAndStoreArticle(articleId);
+      await processAndStoreArticle(articleId, dbWorkerUrl, privateKeyPem, accountId, apiToken, openai);
       processed++;
     } catch (error) {
       console.error(`Failed to process article ${articleId}:`, error);
       // Error is already logged in updateIngestionStatus
     }
 
-    articleId = await getNextPendingArticle();
+    articleId = await getNextPendingArticle(dbWorkerUrl, privateKeyPem);
   }
 
   console.log(`\nIngestion queue processing complete. Processed ${processed} article(s).`);

@@ -4,10 +4,12 @@ import { executeD1Batch, executeD1Query, generateEmbeddingsBatch, insertVectorsB
 /**
  * Store article metadata in D1
  */
-export async function storeArticleMetadata(article: DBArticle): Promise<void> {
+export async function storeArticleMetadata(article: DBArticle, dbWorkerUrl: string, privateKeyPem: string): Promise<void> {
   await executeD1Query(
     `INSERT OR REPLACE INTO articles (article_id, title, authors, created, updated)
      VALUES (?, ?, ?, ?, ?)`,
+    dbWorkerUrl,
+    privateKeyPem,
     [article.article_id, article.title, article.authors, article.created, article.updated]
   );
 }
@@ -15,10 +17,12 @@ export async function storeArticleMetadata(article: DBArticle): Promise<void> {
 /**
  * Store section metadata in D1
  */
-export async function storeSectionMetadata(section: DBSection): Promise<void> {
+export async function storeSectionMetadata(section: DBSection, dbWorkerUrl: string, privateKeyPem: string): Promise<void> {
   await executeD1Query(
     `INSERT OR REPLACE INTO sections (section_id, article_id, number, heading, num_chunks)
      VALUES (?, ?, ?, ?, ?)`,
+    dbWorkerUrl,
+    privateKeyPem,
     [section.section_id, section.article_id, section.number, section.heading, section.num_chunks]
   );
 }
@@ -26,10 +30,12 @@ export async function storeSectionMetadata(section: DBSection): Promise<void> {
 /**
  * Store chunk metadata in D1 (retrieval format)
  */
-export async function storeChunkMetadata(chunk: DBChunk): Promise<void> {
+export async function storeChunkMetadata(chunk: DBChunk, dbWorkerUrl: string, privateKeyPem: string): Promise<void> {
   await executeD1Query(
     `INSERT OR REPLACE INTO chunks (chunk_id, section_id, chunk_index, chunk_text, r2_url)
      VALUES (?, ?, ?, ?, ?)`,
+    dbWorkerUrl,
+    privateKeyPem,
     [chunk.chunk_id, chunk.section_id, chunk.chunk_index, chunk.chunk_text, chunk.r2_url]
   );
 }
@@ -37,9 +43,9 @@ export async function storeChunkMetadata(chunk: DBChunk): Promise<void> {
 /**
  * Store generation format chunk in R2
  */
-export async function storeGenerationChunk(chunkId: string, generationText: string): Promise<string> {
+export async function storeGenerationChunk(chunkId: string, generationText: string, dbWorkerUrl: string, privateKeyPem: string): Promise<string> {
   const key = `chunks/${chunkId}.txt`;
-  await uploadToR2(key, generationText, 'text/plain');
+  await uploadToR2(key, generationText, dbWorkerUrl, privateKeyPem, 'text/plain');
   return key;
 }
 
@@ -48,7 +54,9 @@ export async function storeGenerationChunk(chunkId: string, generationText: stri
  */
 export async function storeChunksBatch(
   chunks: DBChunk[],
-  generationTexts: string[]
+  generationTexts: string[],
+  dbWorkerUrl: string,
+  privateKeyPem: string
 ): Promise<void> {
   if (chunks.length !== generationTexts.length) {
     throw new Error('Chunks and generation texts arrays must have the same length');
@@ -56,7 +64,7 @@ export async function storeChunksBatch(
 
   // Upload all generation texts to R2
   const r2UploadPromises = chunks.map((chunk, index) =>
-    storeGenerationChunk(chunk.chunk_id, generationTexts[index])
+    storeGenerationChunk(chunk.chunk_id, generationTexts[index], dbWorkerUrl, privateKeyPem)
   );
   const r2Keys = await Promise.all(r2UploadPromises);
 
@@ -73,14 +81,20 @@ export async function storeChunksBatch(
     params: [chunk.chunk_id, chunk.section_id, chunk.chunk_index, chunk.chunk_text, chunk.r2_url],
   }));
 
-  await executeD1Batch(queries);
+  await executeD1Batch(queries, dbWorkerUrl, privateKeyPem);
 }
 
 /**
  * Vectorize chunks and store embeddings
  * Generates embeddings using Cloudflare Workers AI and stores them in Vectorize
  */
-export async function vectorizeChunks(chunks: Array<{ chunkId: string; text: string; }>): Promise<void> {
+export async function vectorizeChunks(
+  chunks: Array<{ chunkId: string; text: string; }>,
+  dbWorkerUrl: string,
+  privateKeyPem: string,
+  accountId: string,
+  apiToken: string
+): Promise<void> {
   if (chunks.length === 0) {
     return;
   }
@@ -95,7 +109,7 @@ export async function vectorizeChunks(chunks: Array<{ chunkId: string; text: str
     const texts = batch.map(c => c.text);
 
     console.log(`  Generating embeddings for chunks ${i + 1}-${Math.min(i + BATCH_SIZE, chunks.length)}...`);
-    const embeddings = await generateEmbeddingsBatch(texts);
+    const embeddings = await generateEmbeddingsBatch(texts, accountId, apiToken);
 
     // Store embeddings in Cloudflare Vectorize
     const vectors = batch.map((c, idx) => ({
@@ -104,7 +118,7 @@ export async function vectorizeChunks(chunks: Array<{ chunkId: string; text: str
       metadata: { chunkId: c.chunkId },
     }));
 
-    await insertVectorsBatch(vectors);
+    await insertVectorsBatch(vectors, dbWorkerUrl, privateKeyPem);
     console.log(`  ✓ Stored ${embeddings.length} embeddings in Vectorize`);
   }
 }

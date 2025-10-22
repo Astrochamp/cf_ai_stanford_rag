@@ -14,7 +14,7 @@ export interface EmbeddingTextInput {
 
 export interface RerankingInput {
   query: string;
-  contexts: Array<{ text: string }>;
+  contexts: Array<{ text: string; }>;
   top_k?: number;
 }
 
@@ -27,7 +27,7 @@ export interface RerankingResponse {
 
 export interface EmbeddingContextsInput {
   query?: string;
-  contexts: Array<{ text: string }>;
+  contexts: Array<{ text: string; }>;
   truncate_inputs?: boolean;
 }
 
@@ -61,9 +61,9 @@ export interface EmbeddingAsyncResponse {
   request_id: string;
 }
 
-export type EmbeddingResponse = 
-  | EmbeddingQueryResponse 
-  | EmbeddingVectorResponse 
+export type EmbeddingResponse =
+  | EmbeddingQueryResponse
+  | EmbeddingVectorResponse
   | EmbeddingContextsResponse
   | EmbeddingAsyncResponse;
 
@@ -71,14 +71,8 @@ export type EmbeddingResponse =
 // CONFIGURATION
 // ============================================================================
 
-const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID;
-const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN;
 const EMBEDDING_MODEL = '@cf/baai/bge-m3';
 const RERANKER_MODEL = '@cf/baai/bge-reranker-base';
-
-if (!CLOUDFLARE_ACCOUNT_ID || !CLOUDFLARE_API_TOKEN) {
-  throw new Error('Missing CLOUDFLARE_ACCOUNT_ID or CLOUDFLARE_API_TOKEN environment variables');
-}
 
 // ============================================================================
 // EMBEDDING FUNCTIONS
@@ -99,6 +93,8 @@ if (!CLOUDFLARE_ACCOUNT_ID || !CLOUDFLARE_API_TOKEN) {
  */
 export async function m3embedText(
   text: string[],
+  accountId: string,
+  apiToken: string,
   options: {
     truncate_inputs?: boolean;
     signal?: AbortSignal;
@@ -112,7 +108,7 @@ export async function m3embedText(
     throw new Error('Maximum 100 texts can be embedded per call');
   }
 
-  const url = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${EMBEDDING_MODEL}`;
+  const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${EMBEDDING_MODEL}`;
 
   const requestBody: EmbeddingTextInput = {
     text,
@@ -123,7 +119,7 @@ export async function m3embedText(
     const response = await fetch(url, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
+        'Authorization': `Bearer ${apiToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(requestBody),
@@ -137,8 +133,8 @@ export async function m3embedText(
       );
     }
 
-    const result = await response.json() as { result: EmbeddingResponse };
-    
+    const result = await response.json() as { result: EmbeddingResponse; };
+
     // Extract embedding data from response
     if ('data' in result.result) {
       return result.result.data;
@@ -165,12 +161,14 @@ export async function m3embedText(
  */
 export async function m3embedSingleText(
   text: string,
+  accountId: string,
+  apiToken: string,
   options: {
     truncate_inputs?: boolean;
     signal?: AbortSignal;
   } = {}
 ): Promise<number[]> {
-  const embeddings = await m3embedText([text], options);
+  const embeddings = await m3embedText([text], accountId, apiToken, options);
   return embeddings[0];
 }
 
@@ -185,16 +183,18 @@ export async function m3embedSingleText(
 export async function m3queryContexts(
   query: string,
   contexts: string[],
+  accountId: string,
+  apiToken: string,
   options: {
     truncate_inputs?: boolean;
     signal?: AbortSignal;
   } = {}
-): Promise<Array<{ id: number; score: number }>> {
+): Promise<Array<{ id: number; score: number; }>> {
   if (contexts.length === 0) {
     throw new Error('Contexts array cannot be empty');
   }
 
-  const url = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${EMBEDDING_MODEL}`;
+  const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${EMBEDDING_MODEL}`;
 
   const requestBody: EmbeddingContextsInput = {
     query,
@@ -206,7 +206,7 @@ export async function m3queryContexts(
     const response = await fetch(url, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
+        'Authorization': `Bearer ${apiToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(requestBody),
@@ -220,8 +220,8 @@ export async function m3queryContexts(
       );
     }
 
-    const result = await response.json() as { result: EmbeddingQueryResponse };
-    
+    const result = await response.json() as { result: EmbeddingQueryResponse; };
+
     if ('response' in result.result && Array.isArray(result.result.response)) {
       return result.result.response;
     } else {
@@ -244,6 +244,8 @@ export async function m3queryContexts(
  */
 export async function m3embedTextBatch(
   texts: string[],
+  accountId: string,
+  apiToken: string,
   options: {
     truncate_inputs?: boolean;
     signal?: AbortSignal;
@@ -255,13 +257,14 @@ export async function m3embedTextBatch(
 
   for (let i = 0; i < texts.length; i += BATCH_SIZE) {
     const batch = texts.slice(i, i + BATCH_SIZE);
-    const embeddings = await m3embedText(batch, {
-      truncate_inputs: options.truncate_inputs,
-      signal: options.signal,
-    });
-    
+    const embeddings = await m3embedText(batch, accountId, apiToken,
+      {
+        truncate_inputs: options.truncate_inputs,
+        signal: options.signal,
+      });
+
     allEmbeddings.push(...embeddings);
-    
+
     if (options.onProgress) {
       options.onProgress(Math.min(i + BATCH_SIZE, texts.length), texts.length);
     }
@@ -293,11 +296,13 @@ export async function m3embedTextBatch(
 export async function rerankChunks(
   query: string,
   contexts: string[],
+  accountId: string,
+  apiToken: string,
   options: {
     top_k?: number;
     signal?: AbortSignal;
   } = {}
-): Promise<Array<{ id: number; score: number }>> {
+): Promise<Array<{ id: number; score: number; }>> {
   if (!query || query.trim().length === 0) {
     throw new Error('Query cannot be empty');
   }
@@ -306,7 +311,7 @@ export async function rerankChunks(
     throw new Error('Contexts array cannot be empty');
   }
 
-  const url = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${RERANKER_MODEL}`;
+  const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${RERANKER_MODEL}`;
 
   const requestBody: RerankingInput = {
     query,
@@ -318,7 +323,7 @@ export async function rerankChunks(
     const response = await fetch(url, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
+        'Authorization': `Bearer ${apiToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(requestBody),
@@ -332,8 +337,8 @@ export async function rerankChunks(
       );
     }
 
-    const result = await response.json() as { result: RerankingResponse };
-    
+    const result = await response.json() as { result: RerankingResponse; };
+
     if ('response' in result.result && Array.isArray(result.result.response)) {
       return result.result.response;
     } else {
@@ -367,13 +372,15 @@ export async function rerankChunks(
 export async function rerankChunksWithText(
   query: string,
   contexts: string[],
+  accountId: string,
+  apiToken: string,
   options: {
     top_k?: number;
     signal?: AbortSignal;
   } = {}
-): Promise<Array<{ text: string; score: number }>> {
-  const results = await rerankChunks(query, contexts, options);
-  
+): Promise<Array<{ text: string; score: number; }>> {
+  const results = await rerankChunks(query, contexts, accountId, apiToken, options);
+
   return results.map(result => ({
     text: contexts[result.id],
     score: result.score

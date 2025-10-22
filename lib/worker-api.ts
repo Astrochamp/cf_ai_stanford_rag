@@ -1,17 +1,17 @@
 import { generateWorkerAuthToken } from './auth';
 import { m3embedSingleText, m3embedTextBatch } from './cf';
 
-const dbWorkerUrl = process.env.DB_WORKER_URL;
-
 /**
  * Upload content to R2 via Worker proxy
  */
-export async function uploadToR2(key: string, content: string, contentType: string = 'text/plain'): Promise<void> {
-  if (!dbWorkerUrl) {
-    throw new Error('DB_WORKER_URL is not set');
-  }
-
-  const token = await generateWorkerAuthToken(dbWorkerUrl);
+export async function uploadToR2(
+  key: string,
+  content: string,
+  dbWorkerUrl: string,
+  privateKeyPem: string,
+  contentType: string = 'text/plain'
+): Promise<void> {
+  const token = await generateWorkerAuthToken(dbWorkerUrl, privateKeyPem);
   const url = `${dbWorkerUrl}/r2/${key}`;
 
   const response = await fetch(url, {
@@ -32,12 +32,8 @@ export async function uploadToR2(key: string, content: string, contentType: stri
 /**
  * Execute a single D1 query via Worker proxy
  */
-export async function executeD1Query(query: string, params?: any[]): Promise<any> {
-  if (!dbWorkerUrl) {
-    throw new Error('DB_WORKER_URL is not set');
-  }
-
-  const token = await generateWorkerAuthToken(dbWorkerUrl);
+export async function executeD1Query(query: string, dbWorkerUrl: string, privateKeyPem: string, params?: any[]): Promise<any> {
+  const token = await generateWorkerAuthToken(dbWorkerUrl, privateKeyPem);
   const url = `${dbWorkerUrl}/d1/query`;
 
   const response = await fetch(url, {
@@ -60,12 +56,8 @@ export async function executeD1Query(query: string, params?: any[]): Promise<any
 /**
  * Execute batch D1 queries via Worker proxy
  */
-export async function executeD1Batch(queries: Array<{ query: string; params?: any[]; }>): Promise<any[]> {
-  if (!dbWorkerUrl) {
-    throw new Error('DB_WORKER_URL is not set');
-  }
-
-  const token = await generateWorkerAuthToken(dbWorkerUrl);
+export async function executeD1Batch(queries: Array<{ query: string; params?: any[]; }>, dbWorkerUrl: string, privateKeyPem: string): Promise<any[]> {
+  const token = await generateWorkerAuthToken(dbWorkerUrl, privateKeyPem);
   const url = `${dbWorkerUrl}/d1/batch`;
 
   const response = await fetch(url, {
@@ -88,31 +80,31 @@ export async function executeD1Batch(queries: Array<{ query: string; params?: an
 /**
  * Generate embeddings using Cloudflare Workers AI (BGE-M3 model)
  */
-export async function generateEmbedding(text: string): Promise<number[]> {
-  return m3embedSingleText(text);
+export async function generateEmbedding(text: string, accountId: string, apiToken: string): Promise<number[]> {
+  return m3embedSingleText(text, accountId, apiToken);
 }
 
 /**
  * Generate embeddings in batches using Cloudflare Workers AI (BGE-M3 model)
  * The CF API handles batching internally with max 100 texts per call
  */
-export async function generateEmbeddingsBatch(texts: string[]): Promise<number[][]> {
+export async function generateEmbeddingsBatch(texts: string[], accountId: string, apiToken: string): Promise<number[][]> {
   if (texts.length === 0) {
     return [];
   }
 
-  return m3embedTextBatch(texts);
+  return m3embedTextBatch(texts, accountId, apiToken);
 }
 
 /**
  * Insert vectors into Vectorize via Worker proxy
  */
-export async function insertVectorsBatch(vectors: Array<{ id: string; values: number[]; metadata?: Record<string, any>; }>): Promise<void> {
-  if (!dbWorkerUrl) {
-    throw new Error('DB_WORKER_URL is not set');
-  }
-
-  const token = await generateWorkerAuthToken(dbWorkerUrl);
+export async function insertVectorsBatch(
+  vectors: Array<{ id: string; values: number[]; metadata?: Record<string, any>; }>,
+  dbWorkerUrl: string,
+  privateKeyPem: string
+): Promise<void> {
+  const token = await generateWorkerAuthToken(dbWorkerUrl, privateKeyPem);
   const url = `${dbWorkerUrl}/vectorize/insert`;
 
   const response = await fetch(url, {
@@ -136,13 +128,11 @@ export async function insertVectorsBatch(vectors: Array<{ id: string; values: nu
 export async function queryVectorize(
   vector: number[],
   topK: number = 10,
+  dbWorkerUrl: string,
+  privateKeyPem: string,
   filter?: Record<string, any>
 ): Promise<any> {
-  if (!dbWorkerUrl) {
-    throw new Error('DB_WORKER_URL is not set');
-  }
-
-  const token = await generateWorkerAuthToken(dbWorkerUrl);
+  const token = await generateWorkerAuthToken(dbWorkerUrl, privateKeyPem);
   const url = `${dbWorkerUrl}/vectorize/query`;
 
   const response = await fetch(url, {
@@ -171,12 +161,8 @@ export async function queryVectorize(
 /**
  * Delete vectors from Vectorize
  */
-export async function deleteVectors(chunkIds: string[]): Promise<void> {
-  if (!dbWorkerUrl) {
-    throw new Error('DB_WORKER_URL is not set');
-  }
-
-  const token = await generateWorkerAuthToken(dbWorkerUrl);
+export async function deleteVectors(chunkIds: string[], dbWorkerUrl: string, privateKeyPem: string): Promise<void> {
+  const token = await generateWorkerAuthToken(dbWorkerUrl, privateKeyPem);
   const url = `${dbWorkerUrl}/vectorize/delete`;
 
   const response = await fetch(url, {
@@ -197,12 +183,8 @@ export async function deleteVectors(chunkIds: string[]): Promise<void> {
 /**
  * Search chunks using BM25 full-text search
  */
-export async function searchChunks(query: string, limit: number = 10): Promise<any> {
-  if (!dbWorkerUrl) {
-    throw new Error('DB_WORKER_URL is not set');
-  }
-
-  const token = await generateWorkerAuthToken(dbWorkerUrl);
+export async function searchChunks(query: string, dbWorkerUrl: string, privateKeyPem: string, limit: number = 10): Promise<any> {
+  const token = await generateWorkerAuthToken(dbWorkerUrl, privateKeyPem);
   const url = new URL(`${dbWorkerUrl}/d1/search`);
   url.searchParams.set('q', query);
   url.searchParams.set('limit', limit.toString());
@@ -225,12 +207,8 @@ export async function searchChunks(query: string, limit: number = 10): Promise<a
 /**
  * Retrieve generation format text from R2
  */
-export async function getGenerationText(chunkId: string): Promise<string> {
-  if (!dbWorkerUrl) {
-    throw new Error('DB_WORKER_URL is not set');
-  }
-
-  const token = await generateWorkerAuthToken(dbWorkerUrl);
+export async function getGenerationText(chunkId: string, dbWorkerUrl: string, privateKeyPem: string): Promise<string> {
+  const token = await generateWorkerAuthToken(dbWorkerUrl, privateKeyPem);
   const key = `chunks/${chunkId}.txt`;
   const url = `${dbWorkerUrl}/r2/${key}`;
 

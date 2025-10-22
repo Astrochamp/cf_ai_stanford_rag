@@ -3,27 +3,34 @@ import { executeD1Query, generateEmbedding, getGenerationText as getGenerationTe
 /**
  * Search chunks using BM25 full-text search
  */
-export async function searchChunks(query: string, limit: number = 10): Promise<any> {
-  return searchChunksWorker(query, limit);
+export async function searchChunks(query: string, dbWorkerUrl: string, privateKeyPem: string, limit: number = 10): Promise<any> {
+  return searchChunksWorker(query, dbWorkerUrl, privateKeyPem, limit);
 }
 
 /**
  * Retrieve generation format text from R2
  */
-export async function getGenerationText(chunkId: string): Promise<string> {
-  return getGenerationTextWorker(chunkId);
+export async function getGenerationText(chunkId: string, dbWorkerUrl: string, privateKeyPem: string): Promise<string> {
+  return getGenerationTextWorker(chunkId, dbWorkerUrl, privateKeyPem);
 }
 
 /**
  * Perform semantic search using vector embeddings
  * Returns chunks ranked by semantic similarity
  */
-export async function semanticSearch(query: string, topK: number = 10): Promise<any[]> {
+export async function semanticSearch(
+  query: string,
+  dbWorkerUrl: string,
+  privateKeyPem: string,
+  accountId: string,
+  apiToken: string,
+  topK: number = 10
+): Promise<any[]> {
   // Generate embedding for the query
-  const queryEmbedding = await generateEmbedding(query);
+  const queryEmbedding = await generateEmbedding(query, accountId, apiToken);
 
   // Query Vectorize for similar chunks
-  const vectorResults = await queryVectorize(queryEmbedding, topK);
+  const vectorResults = await queryVectorize(queryEmbedding, topK, dbWorkerUrl, privateKeyPem);
 
   // Extract chunk IDs and fetch full chunk data from D1
   if (!vectorResults.matches || vectorResults.matches.length === 0) {
@@ -40,6 +47,8 @@ export async function semanticSearch(query: string, topK: number = 10): Promise<
      JOIN sections s ON c.section_id = s.section_id
      JOIN articles a ON s.article_id = a.article_id
      WHERE c.chunk_id IN (${placeholders})`,
+    dbWorkerUrl,
+    privateKeyPem,
     chunkIds
   );
 
