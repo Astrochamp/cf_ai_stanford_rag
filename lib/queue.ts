@@ -51,6 +51,17 @@ export async function updateIngestionStatus(
  * Get the next pending article from the ingestion queue
  */
 export async function getNextPendingArticle(dbWorkerUrl: string, privateKeyPem: string): Promise<string | null> {
+  // First, recover any articles stuck in 'processing' for more than 15 mins
+  const fifteenMinsAgo = Date.now() - (15 * 60 * 1000);
+  await executeD1Query(
+    `UPDATE ingestion_queue
+     SET status = 'failed', error_message = 'Processing timeout - likely crashed'
+     WHERE status = 'processing' AND last_attempt < ?`,
+    dbWorkerUrl,
+    privateKeyPem,
+    [fifteenMinsAgo]
+  );
+
   const result = await executeD1Query(
     `SELECT article_id FROM ingestion_queue
      WHERE status IN ('pending', 'failed')

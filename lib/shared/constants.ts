@@ -13,6 +13,5 @@ export const EXCLUDED_TEX_COMMANDS = new Set([
   'sum', 'int', 'prod', 'lim', 'bigcup', 'bigcap', // operators
   'frac', 'sqrt',                                  // fractions, roots
   'hat', 'bar', 'vec', 'dot', 'tilde',             // accents
-  'mathbb', 'mathcal', 'mathbf', 'mathrm',         // fonts
-  'left', 'right', 'begin', 'end'                  // structural
+  'begin', 'end'                                   // structural
 ]);

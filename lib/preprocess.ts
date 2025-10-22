@@ -272,22 +272,166 @@ function replaceTexWithSymbols(text: string): string {
   const remainingTexRegex = /\\/;
   const mathExpressionRegex = /(?:\\\(|\\\[)(.*?)(?:\\\)|\\\])/gs;
 
-  return text.replace(mathExpressionRegex, (originalMatch, content) => {
+  // Unicode mappings for font commands
+  const mathcalMap: Record<string, string> = {
+    'A': '𝒜', 'B': '𝐵', 'C': '𝒞', 'D': '𝒟', 'E': '𝐸', 'F': '𝐹', 'G': '𝒢',
+    'H': '𝐻', 'I': '𝐼', 'J': '𝒥', 'K': '𝒦', 'L': '𝐿', 'M': '𝑀', 'N': '𝒩',
+    'O': '𝒪', 'P': '𝒫', 'Q': '𝒬', 'R': '𝑅', 'S': '𝒮', 'T': '𝒯', 'U': '𝒰',
+    'V': '𝒱', 'W': '𝒲', 'X': '𝒳', 'Y': '𝒴', 'Z': '𝒵'
+  };
 
-    const firstPassContent = content.replace(texSymbolRegex, (match: string, command: string) => {
+  const mathbbMap: Record<string, string> = {
+    'A': '𝔸', 'B': '𝔹', 'C': 'ℂ', 'D': '𝔻', 'E': '𝔼', 'F': '𝔽', 'G': '𝔾',
+    'H': 'ℍ', 'I': '𝕀', 'J': '𝕁', 'K': '𝕂', 'L': '𝕃', 'M': '𝕄', 'N': 'ℕ',
+    'O': '𝕆', 'P': 'ℙ', 'Q': 'ℚ', 'R': 'ℝ', 'S': '𝕊', 'T': '𝕋', 'U': '𝕌',
+    'V': '𝕍', 'W': '𝕎', 'X': '𝕏', 'Y': '𝕐', 'Z': 'ℤ'
+  };
+
+  const mathbfMap: Record<string, string> = {
+    'A': '𝐀', 'B': '𝐁', 'C': '𝐂', 'D': '𝐃', 'E': '𝐄', 'F': '𝐅', 'G': '𝐆',
+    'H': '𝐇', 'I': '𝐈', 'J': '𝐉', 'K': '𝐊', 'L': '𝐋', 'M': '𝐌', 'N': '𝐍',
+    'O': '𝐎', 'P': '𝐏', 'Q': '𝐐', 'R': '𝐑', 'S': '𝐒', 'T': '𝐓', 'U': '𝐔',
+    'V': '𝐕', 'W': '𝐖', 'X': '𝐗', 'Y': '𝐘', 'Z': '𝐙',
+    'a': '𝐚', 'b': '𝐛', 'c': '𝐜', 'd': '𝐝', 'e': '𝐞', 'f': '𝐟', 'g': '𝐠',
+    'h': '𝐡', 'i': '𝐢', 'j': '𝐣', 'k': '𝐤', 'l': '𝐥', 'm': '𝐦', 'n': '𝐧',
+    'o': '𝐨', 'p': '𝐩', 'q': '𝐪', 'r': '𝐫', 's': '𝐬', 't': '𝐭', 'u': '𝐮',
+    'v': '𝐯', 'w': '𝐰', 'x': '𝐱', 'y': '𝐲', 'z': '𝐳'
+  };
+
+  const mathitMap: Record<string, string> = {
+    'A': '𝐴', 'B': '𝐵', 'C': '𝐶', 'D': '𝐷', 'E': '𝐸', 'F': '𝐹', 'G': '𝐺',
+    'H': '𝐻', 'I': '𝐼', 'J': '𝐽', 'K': '𝐾', 'L': '𝐿', 'M': '𝑀', 'N': '𝑁',
+    'O': '𝑂', 'P': '𝑃', 'Q': '𝑄', 'R': '𝑅', 'S': '𝑆', 'T': '𝑇', 'U': '𝑈',
+    'V': '𝑉', 'W': '𝑊', 'X': '𝑋', 'Y': '𝑌', 'Z': '𝑍',
+    'a': '𝑎', 'b': '𝑏', 'c': '𝑐', 'd': '𝑑', 'e': '𝑒', 'f': '𝑓', 'g': '𝑔',
+    'h': 'ℎ', 'i': '𝑖', 'j': '𝑗', 'k': '𝑘', 'l': '𝑙', 'm': '𝑚', 'n': '𝑛',
+    'o': '𝑜', 'p': '𝑝', 'q': '𝑞', 'r': '𝑟', 's': '𝑠', 't': '𝑡', 'u': '𝑢',
+    'v': '𝑣', 'w': '𝑤', 'x': '𝑥', 'y': '𝑦', 'z': '𝑧'
+  };
+
+  const mathsfMap: Record<string, string> = {
+    'A': '𝖠', 'B': '𝖡', 'C': '𝖢', 'D': '𝖣', 'E': '𝖤', 'F': '𝖥', 'G': '𝖦',
+    'H': '𝖧', 'I': '𝖨', 'J': '𝖩', 'K': '𝖪', 'L': '𝖫', 'M': '𝖬', 'N': '𝖭',
+    'O': '𝖮', 'P': '𝖯', 'Q': '𝖰', 'R': '𝖱', 'S': '𝖲', 'T': '𝖳', 'U': '𝖴',
+    'V': '𝖵', 'W': '𝖶', 'X': '𝖷', 'Y': '𝖸', 'Z': '𝖹',
+    'a': '𝖺', 'b': '𝖻', 'c': '𝖼', 'd': '𝖽', 'e': '𝖾', 'f': '𝖿', 'g': '𝗀',
+    'h': '𝗁', 'i': '𝗂', 'j': '𝗃', 'k': '𝗄', 'l': '𝗅', 'm': '𝗆', 'n': '𝗇',
+    'o': '𝗈', 'p': '𝗉', 'q': '𝗊', 'r': '𝗋', 's': '𝗌', 't': '𝗍', 'u': '𝗎',
+    'v': '𝗏', 'w': '𝗐', 'x': '𝗑', 'y': '𝗒', 'z': '𝗓'
+  };
+
+  return text.replace(mathExpressionRegex, (originalMatch, content) => {
+    let processedContent = content;
+
+    // Handle font commands FIRST (before general symbol replacement)
+
+    // Handle \text{...} command - just extract the content as plain text
+    processedContent = processedContent.replace(/\\text\{([^}]*)\}/g, (match: string, text: string) => {
+      // Replace escaped spaces with normal spaces
+      return text.replace(/\\ /g, ' ').replace(/\\\n/g, ' ');
+    });
+
+    // Helper function to convert multi-character content with per-character font mapping
+    const convertWithFontMap = (content: string, fontMap: Record<string, string>): string => {
+      return content.split('').map(char => fontMap[char] || char).join('');
+    };
+
+    // Helper function to clean up multi-character content (spaces, newlines)
+    const cleanMultiCharContent = (content: string): string => {
+      return content.replace(/\\ /g, ' ').replace(/\\\n/g, ' ').replace(/\s+/g, ' ').trim();
+    };
+
+    // Convert \mathcal{X} -> Unicode Mathematical Script (uppercase only)
+    // Single letter: use map, multiple chars: convert each letter
+    processedContent = processedContent.replace(/\\mathcal\{([^}]*)\}/g, (match: string, content: string) => {
+      const cleaned = cleanMultiCharContent(content);
+      return cleaned.split('').map(char => {
+        const upper = char.toUpperCase();
+        return mathcalMap[upper] || char;
+      }).join('');
+    });
+
+    // Convert \mathbb{X} -> Unicode Mathematical Double-Struck (uppercase only)
+    processedContent = processedContent.replace(/\\mathbb\{([^}]*)\}/g, (match: string, content: string) => {
+      const cleaned = cleanMultiCharContent(content);
+      return cleaned.split('').map(char => {
+        const upper = char.toUpperCase();
+        return mathbbMap[upper] || char;
+      }).join('');
+    });
+
+    // Convert \mathbf{...} -> Unicode Mathematical Bold
+    processedContent = processedContent.replace(/\\mathbf\{([^}]*)\}/g, (match: string, content: string) => {
+      const cleaned = cleanMultiCharContent(content);
+      return convertWithFontMap(cleaned, mathbfMap);
+    });
+
+    // Convert \mathit{...} -> Unicode Mathematical Italic
+    processedContent = processedContent.replace(/\\mathit\{([^}]*)\}/g, (match: string, content: string) => {
+      const cleaned = cleanMultiCharContent(content);
+      return convertWithFontMap(cleaned, mathitMap);
+    });
+
+    // Convert \mathsf{...} -> Unicode Mathematical Sans-Serif
+    processedContent = processedContent.replace(/\\mathsf\{([^}]*)\}/g, (match: string, content: string) => {
+      const cleaned = cleanMultiCharContent(content);
+      return convertWithFontMap(cleaned, mathsfMap);
+    });
+
+    // Convert \mathrm{...} -> just extract (upright/roman is default, no special Unicode)
+    processedContent = processedContent.replace(/\\mathrm\{([^}]*)\}/g, (match: string, content: string) => {
+      return cleanMultiCharContent(content);
+    });
+
+    // Handle \not\command patterns (negated relations)
+    // \not\models -> ⊭, \not\in -> ∉, \not\equiv -> ≢, etc.
+    const notCombinations: Record<string, string> = {
+      'models': '⊭',
+      'in': '∉',
+      'equiv': '≢',
+      'sim': '≁',
+      'simeq': '≄',
+      'approx': '≉',
+      'cong': '≇',
+      'subset': '⊄',
+      'supset': '⊅',
+      'subseteq': '⊈',
+      'supseteq': '⊉',
+      'exists': '∄'
+    };
+
+    processedContent = processedContent.replace(/\\not\\([a-zA-Z]+)/g, (match: string, command: string) => {
+      return notCombinations[command] || `¬${texMap[command] || match}`;
+    });
+
+    // Handle \sqrt{...} - extract just the content with "sqrt(...)" format
+    processedContent = processedContent.replace(/\\sqrt\{([^}]*)\}/g, (match: string, content: string) => {
+      const cleaned = cleanMultiCharContent(content);
+      return `√(${cleaned})`;
+    });
+
+    // Replace TeX symbols with Unicode equivalents
+    const firstPassContent = processedContent.replace(texSymbolRegex, (match: string, command: string) => {
       if (EXCLUDED_TEX_COMMANDS.has(command) || !texMap[command]) {
         return match; // keep complex commands e.g \frac, \sum
       }
       return texMap[command]; // replace simple symbols
     });
 
+    // Remove \left and \right 
+    const withoutLeftRight = firstPassContent
+      .replace(/\\left\b/g, '')
+      .replace(/\\right\b/g, '');
+
     // replace "\rN" -> "N" and "\bT" -> "T"
     const customTypesetRegex = /\\[rb]([A-Za-z])/g;
-    const removedCustomTypeset: string = firstPassContent.replace(customTypesetRegex, (match: string, letter: string): string => letter);
+    const removedCustomTypeset: string = withoutLeftRight.replace(customTypesetRegex, (match: string, letter: string): string => letter);
 
     // Remove TeX spacing commands: \, \; \: \! \quad \qquad etc.
     // These are spacing commands that don't translate to Unicode symbols
     const spacingCommandsRemoved = removedCustomTypeset
+      .replace(/\\ /g, ' ')      // escaped space
+      .replace(/\\\n/g, ' ')     // escaped newline (used in mathsf/text)
       .replace(/\\,/g, ' ')      // thin space
       .replace(/\\;/g, ' ')      // thick space
       .replace(/\\:/g, ' ')      // medium space
@@ -296,7 +440,11 @@ function replaceTexWithSymbols(text: string): string {
       .replace(/\\qquad\b/g, ' '); // double quad space
 
     // clean up braces and loose backslashes
-    const processedContent = spacingCommandsRemoved.replace(/\\{/g, "{").replace(/\\}/g, "}").replace(/\s+\\\s+/g, ' ');
+    processedContent = spacingCommandsRemoved
+      .replace(/\\{/g, "{")
+      .replace(/\\}/g, "}")
+      .replace(/\s+\\\s+/g, ' ')
+      .trim();
 
     if (remainingTexRegex.test(processedContent)) {
       const startDelimiter = originalMatch.slice(0, 2); // e.g., "\(" or "\["

@@ -101,24 +101,49 @@ export async function vectorizeChunks(
 
   console.log(`  Vectorizing ${chunks.length} chunks...`);
 
-  // Process in batches of 100 (API limit)
-  const BATCH_SIZE = 100;
+  // Simple batching strategy with exponential backoff on token-limit errors.
+  const MAX_API_TEXTS = 100; // API hard limit per call
+  let batchSize = Math.min(48, chunks.length); // start with max 48
+  let i = 0;
+  let batchNumber = 0;
 
-  for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
-    const batch = chunks.slice(i, i + BATCH_SIZE);
-    const texts = batch.map(c => c.text);
+  // Helper to detect CF token/context limit errors
+  const isTokenLimitError = (err: unknown) => {
+    const msg = (err && (err as any).message) ? String((err as any).message).toLowerCase() : String(err);
+    return msg.toLowerCase().includes('max context reached');
+  };
 
-    console.log(`  Generating embeddings for chunks ${i + 1}-${Math.min(i + BATCH_SIZE, chunks.length)}...`);
-    const embeddings = await generateEmbeddingsBatch(texts, accountId, apiToken);
+  while (i < chunks.length) {
+    const size = Math.min(batchSize, MAX_API_TEXTS, chunks.length - i);
+    const slice = chunks.slice(i, i + size);
+    const texts = slice.map(c => c.text);
+    const startChunk = i + 1;
+    const endChunk = i + size;
+    batchNumber++;
 
-    // Store embeddings in Cloudflare Vectorize
-    const vectors = batch.map((c, idx) => ({
-      id: c.chunkId,
-      values: embeddings[idx],
-      metadata: { chunkId: c.chunkId },
-    }));
+    try {
+      console.log(`  Generating embeddings for chunks ${startChunk}-${endChunk} (${size} chunks; batchSize=${batchSize})...`);
+      const embeddings = await generateEmbeddingsBatch(texts, accountId, apiToken);
 
-    await insertVectorsBatch(vectors, dbWorkerUrl, privateKeyPem);
-    console.log(`  ✓ Stored ${embeddings.length} embeddings in Vectorize`);
+      const vectors = slice.map((c, idx) => ({
+        id: c.chunkId,
+        values: embeddings[idx],
+        metadata: { chunkId: c.chunkId },
+      }));
+
+      await insertVectorsBatch(vectors, dbWorkerUrl, privateKeyPem);
+      console.log(`  ✓ Stored ${embeddings.length} embeddings in Vectorize`);
+
+      i += size; // advance on success
+    } catch (err) {
+      if (isTokenLimitError(err) && batchSize > 1) {
+        const newSize = Math.max(1, Math.floor(batchSize / 2));
+        console.warn(`  ⚠️ Token/context limit at batchSize=${batchSize}. Reducing to ${newSize} and retrying...`);
+        batchSize = newSize;
+        // do not advance i; retry the same window with smaller batch
+        continue;
+      }
+      throw err; // non-token error or already at 1
+    }
   }
 }
