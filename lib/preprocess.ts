@@ -270,7 +270,7 @@ function replaceTexWithSymbols(text: string): string {
   const texMap = texToUnicodeMap as Record<string, string>;
   const texSymbolRegex = /\\([a-zA-Z]+)/g;
   const remainingTexRegex = /\\/;
-  const mathExpressionRegex = /(?:\\\(|\\\[)(.*?)(?:\\\)|\\\])/g;
+  const mathExpressionRegex = /(?:\\\(|\\\[)(.*?)(?:\\\)|\\\])/gs;
 
   return text.replace(mathExpressionRegex, (originalMatch, content) => {
 
@@ -285,8 +285,18 @@ function replaceTexWithSymbols(text: string): string {
     const customTypesetRegex = /\\[rb]([A-Za-z])/g;
     const removedCustomTypeset: string = firstPassContent.replace(customTypesetRegex, (match: string, letter: string): string => letter);
 
+    // Remove TeX spacing commands: \, \; \: \! \quad \qquad etc.
+    // These are spacing commands that don't translate to Unicode symbols
+    const spacingCommandsRemoved = removedCustomTypeset
+      .replace(/\\,/g, ' ')      // thin space
+      .replace(/\\;/g, ' ')      // thick space
+      .replace(/\\:/g, ' ')      // medium space
+      .replace(/\\!/g, '')       // negative thin space (remove)
+      .replace(/\\quad\b/g, ' ') // quad space
+      .replace(/\\qquad\b/g, ' '); // double quad space
+
     // clean up braces and loose backslashes
-    const processedContent = removedCustomTypeset.replace(/\\{/g, "{").replace(/\\}/g, "}").replace(/\s+\\\s+/g, ' ');
+    const processedContent = spacingCommandsRemoved.replace(/\\{/g, "{").replace(/\\}/g, "}").replace(/\s+\\\s+/g, ' ');
 
     if (remainingTexRegex.test(processedContent)) {
       const startDelimiter = originalMatch.slice(0, 2); // e.g., "\(" or "\["

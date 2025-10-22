@@ -108,7 +108,7 @@ async function example5() {
 */
 
 async function processAllWithQueue() {
-  const articleIds = ['logic-ancient', 'logic-modal', 'logic-temporal'];
+  const articleIds = ['logic-temporal'];
   for (const id of articleIds) {
     await addToIngestionQueue(id, dbWorkerUrl, privateKeyPem);
   }
