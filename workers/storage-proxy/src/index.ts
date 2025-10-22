@@ -102,8 +102,20 @@ async function callExpressEndpoint(
 }
 
 
+// Sanitize FTS5 query by escaping special characters and removing problematic punctuation
+function sanitizeFTS5Query(query: string): string {
+  // Remove or escape FTS5 special characters: " * ? : ( ) [ ] { } ^ $ + - = < > ! | & ~ \
+  // For simplicity, we'll just remove punctuation except spaces and basic word characters
+  return query
+    .replace(/[^\w\s]/g, ' ')  // Replace non-alphanumeric (except spaces) with space
+    .replace(/\s+/g, ' ')       // Normalize multiple spaces to single space
+    .trim();
+}
+
 async function searchChunks(env: Env, searchQuery: string, limit: number = 10) {
   // basic BM25 search - returns results ranked by relevance
+  const sanitizedQuery = sanitizeFTS5Query(searchQuery);
+
   const results = await env.d1.prepare(`
     SELECT 
       chunks.chunk_id,
@@ -115,19 +127,21 @@ async function searchChunks(env: Env, searchQuery: string, limit: number = 10) {
     WHERE chunks_fts MATCH ?
     ORDER BY rank
     LIMIT ?
-  `).bind(searchQuery, limit).all();
+  `).bind(sanitizedQuery, limit).all();
   return results;
 }
 
 async function simpleSearchChunks(env: Env, searchQuery: string, limit: number = 10) {
   // simple search without joins - returns chunk text and rank only
+  const sanitizedQuery = sanitizeFTS5Query(searchQuery);
+
   const results = await env.d1.prepare(`
   SELECT chunk_text, rank
   FROM chunks_fts
   WHERE chunks_fts MATCH ?
   ORDER BY rank
   LIMIT ?
-`).bind(searchQuery, limit).all();
+`).bind(sanitizedQuery, limit).all();
   return results;
 }
 
@@ -351,7 +365,7 @@ async function handleD1SearchChunks(env: Env, url: URL): Promise<Response> {
 
 async function handleVectorizeInsert(env: Env, request: Request): Promise<Response> {
   try {
-    const body = await request.json() as { vectors: Array<{ id: string; values: number[]; metadata?: Record<string, any> }> };
+    const body = await request.json() as { vectors: Array<{ id: string; values: number[]; metadata?: Record<string, any>; }>; };
 
     if (!body.vectors || !Array.isArray(body.vectors)) {
       return new Response(JSON.stringify({ error: 'Vectors array is required' }), {
@@ -362,9 +376,9 @@ async function handleVectorizeInsert(env: Env, request: Request): Promise<Respon
 
     await env.vectorize.upsert(body.vectors);
 
-    return new Response(JSON.stringify({ 
-      success: true, 
-      inserted: body.vectors.length 
+    return new Response(JSON.stringify({
+      success: true,
+      inserted: body.vectors.length
     }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
@@ -382,9 +396,9 @@ async function handleVectorizeInsert(env: Env, request: Request): Promise<Respon
 
 async function handleVectorizeQuery(env: Env, request: Request): Promise<Response> {
   try {
-    const body = await request.json() as { 
-      vector: number[]; 
-      topK?: number; 
+    const body = await request.json() as {
+      vector: number[];
+      topK?: number;
       filter?: Record<string, any>;
       returnValues?: boolean;
       returnMetadata?: boolean;
@@ -421,7 +435,7 @@ async function handleVectorizeQuery(env: Env, request: Request): Promise<Respons
 
 async function handleVectorizeDelete(env: Env, request: Request): Promise<Response> {
   try {
-    const body = await request.json() as { ids: string[] };
+    const body = await request.json() as { ids: string[]; };
 
     if (!body.ids || !Array.isArray(body.ids)) {
       return new Response(JSON.stringify({ error: 'IDs array is required' }), {
@@ -432,9 +446,9 @@ async function handleVectorizeDelete(env: Env, request: Request): Promise<Respon
 
     await env.vectorize.deleteByIds(body.ids);
 
-    return new Response(JSON.stringify({ 
-      success: true, 
-      deleted: body.ids.length 
+    return new Response(JSON.stringify({
+      success: true,
+      deleted: body.ids.length
     }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },

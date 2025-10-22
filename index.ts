@@ -1,9 +1,8 @@
 import 'dotenv/config';
+import express from 'express';
 import { OpenAI } from "openai";
 import { createVerifyWorkerAuth } from './lib/auth';
-import { processIngestionQueue } from './lib/ingestion';
-import { addToIngestionQueue } from './lib/queue';
-import express from 'express';
+import { hybridSearch } from './lib/hybrid-search';
 
 function requireEnvVar(name: string): string {
   const value = process.env[name];
@@ -29,6 +28,67 @@ const verifyWorkerAuth = createVerifyWorkerAuth(workerPublicKeyPem, expressServe
 
 const app = express();
 const port = process.env.PORT || 3000;
+
+app.use(express.json());
+
+// ============================================================================
+// API ENDPOINTS
+// ============================================================================
+
+/**
+ * POST /search
+ * Hybrid search endpoint combining vector search, BM25, RRF fusion, and reranking
+ * 
+ * Body:
+ * - query: string (required) - The search query
+ * - topK: number (optional, default 10) - Number of final results
+ * - vectorTopK: number (optional, default 50) - Vector search results
+ * - bm25TopK: number (optional, default 50) - BM25 search results
+ * - rrfTopK: number (optional, default 50) - Results after RRF fusion
+ */
+app.post('/search', async (req, res) => {
+  try {
+    const { query, topK = 10, vectorTopK = 50, bm25TopK = 50, rrfTopK = 50 } = req.body;
+
+    if (!query || typeof query !== 'string' || query.trim().length === 0) {
+      return res.status(400).json({ error: 'Query is required and must be a non-empty string' });
+    }
+
+    console.log(`\nSearch query: "${query}"`);
+    console.log(`Parameters: topK=${topK}, vectorTopK=${vectorTopK}, bm25TopK=${bm25TopK}, rrfTopK=${rrfTopK}`);
+
+    const results = await hybridSearch(
+      query,
+      dbWorkerUrl,
+      privateKeyPem,
+      cloudflareAccountId,
+      cloudflareApiToken,
+      topK,
+      vectorTopK,
+      bm25TopK,
+      rrfTopK
+    );
+
+    console.log(`Found ${results.length} results`);
+
+    return res.json({
+      query,
+      results,
+      count: results.length,
+    });
+  } catch (error) {
+    console.error('Search error:', error);
+    return res.status(500).json({
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
 
 // ============================================================================
 // EXAMPLE USAGE (uncomment to run)
@@ -107,6 +167,21 @@ async function example5() {
 // example5().catch(console.error);
 */
 
+// ============================================================================
+// SERVER STARTUP
+// ============================================================================
+
+app.listen(port, () => {
+  console.log(`\n🚀 Server running on http://localhost:${port}`);
+  console.log(`   POST /search - Hybrid search endpoint`);
+  console.log(`   GET  /health - Health check\n`);
+});
+
+// ============================================================================
+// INGESTION SCRIPT (uncomment to run)
+// ============================================================================
+
+/*
 async function processAllWithQueue() {
   const articleIds = ['logic-temporal'];
   for (const id of articleIds) {
@@ -117,3 +192,4 @@ async function processAllWithQueue() {
 }
 
 processAllWithQueue().catch(console.error);
+*/
