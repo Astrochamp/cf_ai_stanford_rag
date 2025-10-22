@@ -1,5 +1,5 @@
-import { executeD1Query, generateEmbedding, queryVectorize, searchChunks } from './worker-api';
 import { rerankChunks } from './cf';
+import { executeD1Query, generateEmbedding, queryVectorize, searchChunks } from './worker-api';
 
 /**
  * Reciprocal Rank Fusion (RRF) score calculation
@@ -10,14 +10,106 @@ function rrfScore(rank: number, k: number = 60): number {
   return 1 / (k + rank + 1);
 }
 
+export interface ChunkNeighbor {
+  chunk_id: string;
+  section_id: string;
+  chunk_index: number;
+  chunk_text: string;
+  r2_url: string | null;
+  article_id: string;
+  article_title: string;
+  heading: string | null;
+  section_number: string;
+}
+
+/**
+ * Get neighboring chunks from the same section
+ * 
+ * Returns up to 2 neighboring chunks from the same section:
+ * - If chunk is first in section: returns n+1 and n+2 (if they exist)
+ * - If chunk is last in section: returns n-1 and n-2 (if they exist)
+ * - Otherwise: returns n-1 and n+1
+ * 
+ * @param chunkId - The ID of the chunk to find neighbors for
+ * @param dbWorkerUrl - Database worker URL
+ * @param privateKeyPem - Private key for JWT auth
+ * @returns Array of neighboring chunks (may be empty if section has only 1 chunk)
+ */
+export async function getChunkNeighbors(
+  chunkId: string,
+  dbWorkerUrl: string,
+  privateKeyPem: string
+): Promise<ChunkNeighbor[]> {
+  // First, get the current chunk's section_id, chunk_index, and total chunks in section
+  const currentChunkResult = await executeD1Query(
+    `SELECT c.chunk_id, c.section_id, c.chunk_index, s.num_chunks
+     FROM chunks c
+     JOIN sections s ON c.section_id = s.section_id
+     WHERE c.chunk_id = ?`,
+    dbWorkerUrl,
+    privateKeyPem,
+    [chunkId]
+  );
+
+  if (!currentChunkResult.results || currentChunkResult.results.length === 0) {
+    throw new Error(`Chunk not found: ${chunkId}`);
+  }
+
+  const currentChunk = currentChunkResult.results[0];
+  const { section_id, chunk_index, num_chunks } = currentChunk;
+
+  // If section has only 1 chunk, return empty array
+  if (num_chunks <= 1) {
+    return [];
+  }
+
+  // Determine which indices to fetch
+  let indicesToFetch: number[] = [];
+
+  if (chunk_index === 0) {
+    // First chunk: get n+1 and n+2
+    indicesToFetch = [1];
+    if (num_chunks > 2) {
+      indicesToFetch.push(2);
+    }
+  } else if (chunk_index === num_chunks - 1) {
+    // Last chunk: get n-1 and n-2
+    indicesToFetch = [chunk_index - 1];
+    if (chunk_index >= 2) {
+      indicesToFetch.unshift(chunk_index - 2);
+    }
+  } else {
+    // Middle chunk: get n-1 and n+1
+    indicesToFetch = [chunk_index - 1, chunk_index + 1];
+  }
+
+  // Fetch the neighboring chunks
+  const placeholders = indicesToFetch.map(() => '?').join(',');
+  const neighborsResult = await executeD1Query(
+    `SELECT c.chunk_id, c.section_id, c.chunk_index, c.chunk_text, c.r2_url,
+            s.heading, s.number as section_number,
+            a.article_id, a.title as article_title
+     FROM chunks c
+     JOIN sections s ON c.section_id = s.section_id
+     JOIN articles a ON s.article_id = a.article_id
+     WHERE c.section_id = ? AND c.chunk_index IN (${placeholders})
+     ORDER BY c.chunk_index`,
+    dbWorkerUrl,
+    privateKeyPem,
+    [section_id, ...indicesToFetch]
+  );
+
+  return neighborsResult.results || [];
+}
+
 /**
  * Deduplicate and merge results from multiple search methods using RRF
  */
 function mergeWithRRF(
-  vectorResults: Array<{ id: string; score: number }>,
-  bm25Results: Array<{ chunk_id: string; rank: number }>,
+  vectorResults: Array<{ id: string; score: number; }>,
+  bm25Results: Array<{ chunk_id: string; rank: number; }>,
   topK: number = 50
-): Array<{ chunk_id: string; rrf_score: number }> {
+): Array<{ chunk_id: string; rrf_score: number; }> {
   const scoresMap = new Map<string, number>();
 
   // Add vector search scores
@@ -44,6 +136,7 @@ export interface HybridSearchResult {
   section_id: string;
   article_id: string;
   chunk_text: string;
+  r2_url: string | null;
   heading: string | null;
   section_number: string;
   article_title: string;
@@ -109,9 +202,9 @@ export async function hybridSearch(
   console.log(`Fetching ${mergedResults.length} chunks from D1...`);
   const chunkIds = mergedResults.map(r => r.chunk_id);
   const placeholders = chunkIds.map(() => '?').join(',');
-  
+
   const chunksResult = await executeD1Query(
-    `SELECT c.chunk_id, c.section_id, c.chunk_text, s.heading, s.number as section_number, 
+    `SELECT c.chunk_id, c.section_id, c.chunk_text, c.r2_url, s.heading, s.number as section_number, 
             a.article_id, a.title as article_title
      FROM chunks c
      JOIN sections s ON c.section_id = s.section_id

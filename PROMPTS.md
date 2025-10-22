@@ -84,3 +84,20 @@ output schema: ...
 ```
 Move functions in this file to new modules in ./lib
 ```
+
+```
+I have added a single document (56 chunks) to Vectorize. Could you update the backend to add an express endpoint to handle search?
+
+Here are the steps for search:
+1. query Vectorize and get top 50 chunks
+2. search D1 with BM25 (FTS5 extension) - top 50 chunks
+3. dedupe, unify top-K from both with RRF and rerank using bge-reranker-base
+
+I'll work on the remaining steps once you've completed the above.
+```
+
+```
+Add a function to get the immediate neighbours (+- 1) of a chunk, but only from the same section.
+If a section has only one chunk, return an empty list. If a section has two chunks, return the only neighbour of the chunk.
+If the chunk is the first in its section, attempt to fetch n+1 and n+2. If it's the last, try n-2 and n-1. Otherwise, n-1 and n+1.
+```

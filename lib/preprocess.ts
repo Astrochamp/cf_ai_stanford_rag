@@ -1395,15 +1395,15 @@ async function batchPreprocessItemsDual(
       r = normaliseText(r);
 
       const replacedR = replaceTexWithSymbols(r);
-      const replacedG = replaceTexWithSymbols(g);
+      // For generation, keep original TeX expressions (don't convert to Unicode)
 
       prepared.push({
         index: i,
         kind,
         retrieval: replacedR,
-        generation: replacedG,
+        generation: g,
         needsRetrievalTexConversion: TEX_PATTERN.test(replacedR),
-        needsGenerationTexConversion: false // generation keeps TeX symbols
+        needsGenerationTexConversion: false // generation keeps original TeX
       });
     } else if (kind === 'table') {
       const $ = cheerio.load(html);
@@ -1454,13 +1454,13 @@ async function batchPreprocessItemsDual(
 
       let r = normaliseText(rRaw);
       const replacedR = replaceTexWithSymbols(r);
-      const replacedG = replaceTexWithSymbols(gRaw);
+      // For generation, keep original TeX expressions
 
       prepared.push({
         index: i,
         kind,
         retrieval: replacedR,
-        generation: replacedG,
+        generation: gRaw,
         needsRetrievalTexConversion: TEX_PATTERN.test(replacedR),
         needsGenerationTexConversion: false
       });
@@ -1471,13 +1471,13 @@ async function batchPreprocessItemsDual(
       r = normaliseText(r);
 
       const replacedR = replaceTexWithSymbols(r);
-      const replacedG = replaceTexWithSymbols(g);
+      // For generation, keep original TeX expressions
 
       prepared.push({
         index: i,
         kind,
         retrieval: replacedR,
-        generation: replacedG,
+        generation: g,
         needsRetrievalTexConversion: TEX_PATTERN.test(replacedR),
         needsGenerationTexConversion: false
       });
@@ -1502,10 +1502,10 @@ async function batchPreprocessItemsDual(
 
       let r = normaliseText(rDesc);
       const replacedR = replaceTexWithSymbols(r);
-      const replacedG = replaceTexWithSymbols(gMd);
+      // For generation, keep original TeX expressions in markdown table
 
       prepared[index].retrieval = replacedR;
-      prepared[index].generation = replacedG;
+      prepared[index].generation = gMd;
       prepared[index].needsRetrievalTexConversion = TEX_PATTERN.test(replacedR);
       prepared[index].needsGenerationTexConversion = false;
     }
