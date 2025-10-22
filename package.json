@@ -13,6 +13,7 @@
     "express": "^5.1.0",
     "gpt-tokenizer": "^3.2.0",
     "html-entities": "^2.6.0",
+    "jose": "^6.1.0",
     "katex": "^0.16.25",
     "openai": "^6.3.0"
   },
