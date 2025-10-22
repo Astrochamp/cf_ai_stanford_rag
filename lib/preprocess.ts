@@ -1249,8 +1249,11 @@ async function preprocessItemDual(item: SectionItem, articleTitle: string, secti
     g = stripHTMLTags(g);
 
     r = normaliseText(r);
+    // For generation: normalize whitespace but keep TeX and list markers
+    g = normaliseWhitespace(g, true);
+
     r = await processTex(r, openai, true, articleTitle, sectionHeading);
-    g = await processTex(g, openai, false, articleTitle, sectionHeading);
+    // Don't process TeX for generation - keep original
 
     return { retrieval: finalize(r), generation: finalize(g) };
   }
@@ -1268,15 +1271,17 @@ async function preprocessItemDual(item: SectionItem, articleTitle: string, secti
       const md = convertTableToMarkdown(tableHtml);
       rDesc = stripHTMLTags(md).replace(/[|`]/g, '').trim();
     }
-    // Generation: markdown table
-    const gMd = convertTableToMarkdown(tableHtml);
+    // Generation: markdown table (better for LLMs and display)
+    let gMd = convertTableToMarkdown(tableHtml);
+    // Normalize whitespace in the markdown table
+    gMd = normaliseWhitespace(gMd, true);
 
-    // Process TeX
+    // Process TeX for retrieval only
     let r = normaliseText(rDesc);
     r = await processTex(r, openai, true, articleTitle, sectionHeading);
-    let g = await processTex(gMd, openai, false, articleTitle, sectionHeading);
+    // Don't process TeX for generation - keep original in markdown
 
-    return { retrieval: finalize(r), generation: finalize(g) };
+    return { retrieval: finalize(r), generation: finalize(gMd) };
   }
 
   if (kind === 'figure') {
@@ -1319,9 +1324,9 @@ async function preprocessItemDual(item: SectionItem, articleTitle: string, secti
 
     let r = normaliseText(rRaw);
     r = await processTex(r, openai, true, articleTitle, sectionHeading);
-    let g = await processTex(gRaw, openai, false, articleTitle, sectionHeading);
+    // Don't process TeX for generation - keep original with readable markers
 
-    return { retrieval: finalize(r), generation: finalize(g) };
+    return { retrieval: finalize(r), generation: finalize(gRaw) };
   }
 
   if (kind === 'pre') {
@@ -1329,8 +1334,12 @@ async function preprocessItemDual(item: SectionItem, articleTitle: string, secti
     let r = stripHTMLTags(html);
     let g = r; // identical content for generation
     r = normaliseText(r);
+    // For generation: normalize whitespace but preserve structure
+    g = normaliseWhitespace(g, true);
+
     r = await processTex(r, openai, true, articleTitle, sectionHeading);
-    g = await processTex(g, openai, false, articleTitle, sectionHeading);
+    // Don't process TeX for generation - keep original
+
     return { retrieval: finalize(r), generation: finalize(g) };
   }
 
@@ -1340,8 +1349,11 @@ async function preprocessItemDual(item: SectionItem, articleTitle: string, secti
     let g = r; // same textual content, different TeX/diacritics handling below
 
     r = normaliseText(r);
+    // For generation: normalize whitespace but keep original characters and TeX
+    g = normaliseWhitespace(g, true);
+
     r = await processTex(r, openai, true, articleTitle, sectionHeading);
-    g = await processTex(g, openai, false, articleTitle, sectionHeading);
+    // Don't process TeX for generation - keep original
 
     return { retrieval: finalize(r), generation: finalize(g) };
   }
@@ -1393,6 +1405,8 @@ async function batchPreprocessItemsDual(
       r = stripHTMLTags(r);
       g = stripHTMLTags(g);
       r = normaliseText(r);
+      // For generation: normalize whitespace but keep TeX and list markers
+      g = normaliseWhitespace(g, true);
 
       const replacedR = replaceTexWithSymbols(r);
       // For generation, keep original TeX expressions (don't convert to Unicode)
@@ -1454,7 +1468,7 @@ async function batchPreprocessItemsDual(
 
       let r = normaliseText(rRaw);
       const replacedR = replaceTexWithSymbols(r);
-      // For generation, keep original TeX expressions
+      // For generation, keep original TeX expressions and readable format
 
       prepared.push({
         index: i,
@@ -1469,6 +1483,8 @@ async function batchPreprocessItemsDual(
       let r = stripHTMLTags(html);
       let g = r;
       r = normaliseText(r);
+      // For generation: normalize whitespace but keep original characters and TeX
+      g = normaliseWhitespace(g, true);
 
       const replacedR = replaceTexWithSymbols(r);
       // For generation, keep original TeX expressions
@@ -1498,7 +1514,9 @@ async function batchPreprocessItemsDual(
         rDesc = stripHTMLTags(md).replace(/[|`]/g, '').trim();
       }
 
-      const gMd = convertTableToMarkdown(tableHtmls[i]);
+      let gMd = convertTableToMarkdown(tableHtmls[i]);
+      // Normalize whitespace in the markdown table for generation
+      gMd = normaliseWhitespace(gMd, true);
 
       let r = normaliseText(rDesc);
       const replacedR = replaceTexWithSymbols(r);
