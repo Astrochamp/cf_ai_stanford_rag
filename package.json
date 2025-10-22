@@ -6,6 +6,7 @@
     "wrangler": "^4.42.2"
   },
   "dependencies": {
+    "@types/express": "^5.0.3",
     "@types/katex": "^0.16.7",
     "@types/node": "^24.7.2",
     "cheerio": "^1.1.2",

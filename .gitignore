@@ -6,3 +6,4 @@ debug_*.log
 debug_*.json
 debug_*.xml
 test_output/
+**/*.pem

@@ -74,7 +74,7 @@ export async function executeD1Batch(queries: Array<{ query: string; params?: an
     throw new Error(`Failed to execute D1 batch: ${response.status} ${errorText}`);
   }
 
-  return response.json();
+  return response.json() as Promise<any[]>;
 }
 
 /**

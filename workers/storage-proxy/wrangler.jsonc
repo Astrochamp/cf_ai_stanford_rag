@@ -29,7 +29,7 @@
 	  {
 	    "binding": "vectorize",
 	    "index_name": "sep-index-1024-dp",
-      "remote": false
+      "remote": true
 	  }
 	],
 	/**
