@@ -24,7 +24,13 @@
       "bucket_name": "sep-articles",
       "remote": true
     }
-  ]
+  ],
+	"vectorize": [
+	  {
+	    "binding": "vectorize",
+	    "index_name": "sep-index-1024-dp"
+	  }
+	],
 	/**
 	 * Smart Placement
 	 * Docs: https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement

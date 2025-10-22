@@ -5,6 +5,7 @@ import * as jose from 'jose';
 export interface Env {
   d1: D1Database;
   r2: R2Bucket;
+  vectorize: VectorizeIndex; // Vectorize binding for embeddings
   JWT_PUBLIC_KEY: string; // RS256 public key in PEM format (for verifying incoming requests)
   JWT_AUDIENCE: string; // expected audience claim (for incoming requests)
   WORKER_PRIVATE_KEY: string; // RS256 private key in PEM format (for signing outgoing requests)
@@ -345,6 +346,111 @@ async function handleD1SearchChunks(env: Env, url: URL): Promise<Response> {
 }
 
 /**
+ * Vectorize Proxy Functions
+ */
+
+async function handleVectorizeInsert(env: Env, request: Request): Promise<Response> {
+  try {
+    const body = await request.json() as { vectors: Array<{ id: string; values: number[]; metadata?: Record<string, any> }> };
+
+    if (!body.vectors || !Array.isArray(body.vectors)) {
+      return new Response(JSON.stringify({ error: 'Vectors array is required' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    await env.vectorize.upsert(body.vectors);
+
+    return new Response(JSON.stringify({ 
+      success: true, 
+      inserted: body.vectors.length 
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (error: any) {
+    return new Response(JSON.stringify({
+      error: 'Vectorize insert failed',
+      message: error.message
+    }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+}
+
+async function handleVectorizeQuery(env: Env, request: Request): Promise<Response> {
+  try {
+    const body = await request.json() as { 
+      vector: number[]; 
+      topK?: number; 
+      filter?: Record<string, any>;
+      returnValues?: boolean;
+      returnMetadata?: boolean;
+    };
+
+    if (!body.vector || !Array.isArray(body.vector)) {
+      return new Response(JSON.stringify({ error: 'Vector array is required' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    const results = await env.vectorize.query(body.vector, {
+      topK: body.topK || 10,
+      filter: body.filter,
+      returnValues: body.returnValues ?? false,
+      returnMetadata: body.returnMetadata ?? true,
+    });
+
+    return new Response(JSON.stringify(results), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (error: any) {
+    return new Response(JSON.stringify({
+      error: 'Vectorize query failed',
+      message: error.message
+    }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+}
+
+async function handleVectorizeDelete(env: Env, request: Request): Promise<Response> {
+  try {
+    const body = await request.json() as { ids: string[] };
+
+    if (!body.ids || !Array.isArray(body.ids)) {
+      return new Response(JSON.stringify({ error: 'IDs array is required' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    await env.vectorize.deleteByIds(body.ids);
+
+    return new Response(JSON.stringify({ 
+      success: true, 
+      deleted: body.ids.length 
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (error: any) {
+    return new Response(JSON.stringify({
+      error: 'Vectorize delete failed',
+      message: error.message
+    }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+}
+
+/**
  * Router function to handle different endpoints
  */
 async function handleRequest(request: Request, env: Env): Promise<Response> {
@@ -391,6 +497,19 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
     return handleD1SearchChunks(env, url);
   }
 
+  // Vectorize endpoints
+  if (path === '/vectorize/insert' && method === 'POST') {
+    return handleVectorizeInsert(env, request);
+  }
+
+  if (path === '/vectorize/query' && method === 'POST') {
+    return handleVectorizeQuery(env, request);
+  }
+
+  if (path === '/vectorize/delete' && method === 'POST') {
+    return handleVectorizeDelete(env, request);
+  }
+
   return new Response(JSON.stringify({
     error: 'Not found',
     availableEndpoints: {
@@ -405,6 +524,11 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
         'POST /d1/query': 'Execute single query (body: {query, params})',
         'POST /d1/batch': 'Execute batch queries (body: {queries: [{query, params}]})',
         'GET /d1/search': 'Search chunks (query params: q, limit, simple)',
+      },
+      vectorize: {
+        'POST /vectorize/insert': 'Insert vectors (body: {vectors: [{id, values, metadata?}]})',
+        'POST /vectorize/query': 'Query vectors (body: {vector, topK?, filter?, returnValues?, returnMetadata?})',
+        'POST /vectorize/delete': 'Delete vectors (body: {ids: []})',
       },
     },
   }), {

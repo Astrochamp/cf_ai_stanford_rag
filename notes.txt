@@ -28,8 +28,8 @@ SEP Oracle
 initial setup, per article:
 1. fetch article
 2. preprocess and chunk (two formats: retrieval & generation)
-3. store retrieval format in D1
-4. store generation format in R2
+3. store generation format in R2
+4. store retrieval format in D1
 5. vectorise retrieval format chunks & store in Vectorize
 
 to answer user query:
