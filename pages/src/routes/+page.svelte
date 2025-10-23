@@ -1,5 +1,6 @@
 <script lang="ts">
   import { queryOracle } from "$lib/api";
+  import Turnstile from "$lib/components/Turnstile.svelte";
   import { parseTeX } from "$lib/parse";
   import type { Message } from "$lib/types";
   import { marked } from "marked";
@@ -11,6 +12,9 @@
   let isDark = $state(false);
   let inputElement: HTMLTextAreaElement;
   let showUnusedSources = $state<Record<string, boolean>>({});
+
+  let turnstileToken: string | null = null; // Store Turnstile token
+  let turnstileComponent: Turnstile; // Reference to the Turnstile component
 
   const MAX_CHAR_LIMIT = 4000;
   const WARNING_THRESHOLD = 3500;
@@ -102,7 +106,11 @@
     setTimeout(() => autoResizeTextarea(), 0);
 
     try {
-      const response = await queryOracle(currentQuery);
+      const response = await queryOracle(
+        currentQuery,
+        turnstileToken,
+        turnstileComponent,
+      );
 
       const result: Message = {
         id: crypto.randomUUID(),
@@ -313,6 +321,17 @@
       ? `https://plato.stanford.edu/entries/${articleId}/`
       : null;
   }
+
+  function handleTurnstileCallback(event: CustomEvent) {
+    const { token, preClearanceObtained } = event.detail as {
+      token: string;
+      preClearanceObtained: boolean;
+    };
+
+    if (token) {
+      turnstileToken = token; // Store the token for later use
+    }
+  }
 </script>
 
 <svelte:head>
@@ -507,6 +526,22 @@
             </p>
           {/if}
         </div>
+      </div>
+
+      <!-- Turnstile CAPTCHA -->
+      <div class="mt-4 flex justify-center">
+        <Turnstile
+          bind:this={turnstileComponent}
+          siteKey="0x4AAAAAAB8U1p6CW8Zda6xI"
+          theme={isDark ? "dark" : "light"}
+          oncallback={handleTurnstileCallback}
+          onerror={() => {}}
+          ontimeout={() => {}}
+          onexpired={() => {}}
+          onbeforeinteractive={() => {}}
+          onafterinteractive={() => {}}
+          onunsupported={() => {}}
+        />
       </div>
     </div>
 

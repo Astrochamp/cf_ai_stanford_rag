@@ -1,3 +1,4 @@
+import { NextFunction, Request, Response } from 'express';
 import OpenAI from "openai";
 
 export async function classifyQueryRelevance(
@@ -70,4 +71,103 @@ Now classify the incoming query and output exactly the JSON object described abo
     console.error('Error classifying query relevance:', error);
     return 'not_relevant'; // default reject
   }
+}
+
+
+
+interface TurnstileVerifyRequest {
+  secret: string;
+  response: string;
+  remoteip?: string;
+}
+
+interface TurnstileVerifyResponse {
+  success: boolean;
+  challenge_ts?: string;
+  hostname?: string;
+  error_codes?: string[];
+  action?: string;
+  cdata?: string;
+}
+
+interface TurnstileOptions {
+  secretKey: string;
+  tokenField?: string;
+  verifyUrl?: string;
+}
+
+const DEFAULT_OPTIONS: Partial<TurnstileOptions> = {
+  verifyUrl: 'https://challenges.cloudflare.com/turnstile/v0/siteverify',
+};
+
+/**
+ * Creates an Express middleware for Cloudflare Turnstile verification
+ * @param options Configuration options for Turnstile verification
+ */
+export function turnstileMiddleware(options: TurnstileOptions): (req: Request, res: Response, next: NextFunction) => Promise<any> {
+  const { secretKey, verifyUrl } = { ...DEFAULT_OPTIONS, ...options };
+
+  if (!secretKey) {
+    throw new Error('Turnstile secret key is required');
+  }
+
+  return async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      // Extract token from request body
+      const { query, token, topK = 12, } = req.body;
+
+      if (!token) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Turnstile token is required',
+        });
+      }
+
+      // Get client IP (prefer Cloudflare's header if available)
+      const ip = req.headers["True-Client-IP"] as string ||
+        req.headers['cf-connecting-ip'] as string ||
+        req.headers['x-forwarded-for'] as string ||
+        req.ip;
+
+      // Validate token
+      const result = await fetch(verifyUrl || DEFAULT_OPTIONS.verifyUrl!, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          secret: secretKey,
+          response: token,
+          remoteip: ip,
+        } as TurnstileVerifyRequest),
+      });
+
+      if (!result.ok) {
+        console.error('Turnstile verification failed:', await result.text());
+        return res.status(500).json({
+          status: 'error',
+          message: 'Failed to verify Turnstile token',
+        });
+      }
+
+      const verification = await result.json() as TurnstileVerifyResponse;
+
+      if (!verification.success) {
+        console.warn('Turnstile validation failed:', verification.error_codes);
+        return res.status(403).json({
+          status: 'error',
+          message: 'Turnstile verification failed',
+        });
+      }
+
+      // If successful, proceed to next middleware
+      next();
+    } catch (error) {
+      console.error('Turnstile verification error:', error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Internal server error during Turnstile verification',
+      });
+    }
+  };
 }

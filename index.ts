@@ -1,6 +1,8 @@
 import cors from 'cors';
 import 'dotenv/config';
 import express from 'express';
+import rateLimit from 'express-rate-limit';
+import morgan from 'morgan';
 import { OpenAI } from "openai";
 import { createVerifyWorkerAuth } from './lib/auth';
 import { fetchArticlesList, fetchRssArticles } from './lib/fetch';
@@ -8,7 +10,7 @@ import { createEvidenceJson, EvidenceItem, generateResponse } from './lib/genera
 import { hybridSearch } from './lib/hybrid-search';
 import { processIngestionQueue } from './lib/ingestion';
 import { addToIngestionQueue } from './lib/queue';
-import { classifyQueryRelevance } from './lib/security';
+import { classifyQueryRelevance, turnstileMiddleware } from './lib/security';
 import { getArticleUpdatedDate } from './lib/worker-api';
 
 
@@ -27,6 +29,7 @@ const cloudflareAccountId = requireEnvVar('CLOUDFLARE_ACCOUNT_ID');
 const cloudflareApiToken = requireEnvVar('CLOUDFLARE_API_TOKEN');
 const dbWorkerUrl = requireEnvVar('DB_WORKER_URL');
 const openaiApiKey = requireEnvVar('OPENAI_API_KEY');
+const turnstileSecretKey = requireEnvVar('TURNSTILE_SECRET_KEY');
 
 const openai = new OpenAI({
   apiKey: openaiApiKey,
@@ -34,16 +37,37 @@ const openai = new OpenAI({
 
 const verifyWorkerAuth = createVerifyWorkerAuth(workerPublicKeyPem, expressServerUrl);
 
+const turnstile = turnstileMiddleware({
+  secretKey: turnstileSecretKey,
+});
+
 const app = express();
 const port = process.env.PORT || 3000;
+
+app.use(express.json());
 
 // Enable CORS for frontend
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-app.use(express.json());
+// Logging
+app.use(morgan('combined'));
+
+// proxy config
+app.set('trust proxy', true); // Trust first proxy (for Heroku, etc.)
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 15, // limit each IP to 15 requests per windowMs
+  standardHeaders: true,
+  legacyHeaders: true,
+});
+app.use('/search', limiter);
 
 // ============================================================================
 // API ENDPOINTS
@@ -57,7 +81,7 @@ app.use(express.json());
  * - query: string (required) - The search query (max 4000 characters)
  * - topK: number (optional, default 12, [1,12]) - Number of final results
  */
-app.post('/search', async (req, res) => {
+app.post('/search', turnstile, async (req, res) => {
   try {
     let { query, topK = 12 } = req.body;
 
@@ -278,18 +302,3 @@ app.listen(port, () => {
   console.log(`   POST /ingest-updates - Authenticated RSS updates endpoint`);
   console.log(`   GET  /health - Health check\n`);
 });
-
-// ============================================================================
-// INGESTION SCRIPT (uncomment to run)
-// ============================================================================
-
-// async function processAllWithQueue() {
-//   const articleIds = ['logic-temporal'];
-//   for (const id of articleIds) {
-//     await addToIngestionQueue(id, dbWorkerUrl, privateKeyPem);
-//   }
-
-//   await processIngestionQueue(dbWorkerUrl, privateKeyPem, cloudflareAccountId, cloudflareApiToken, openai);
-// }
-
-// processAllWithQueue().catch(console.error);
