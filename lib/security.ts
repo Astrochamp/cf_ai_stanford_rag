@@ -69,7 +69,7 @@ Now classify the incoming query and output exactly the JSON object described abo
     return label;
   } catch (error) {
     console.error('Error classifying query relevance:', error);
-    return 'not_relevant'; // default reject
+    throw error;
   }
 }
 

@@ -2,6 +2,7 @@ import cors from 'cors';
 import 'dotenv/config';
 import express from 'express';
 import rateLimit from 'express-rate-limit';
+import helmet from 'helmet';
 import morgan from 'morgan';
 import { OpenAI } from "openai";
 import { createVerifyWorkerAuth } from './lib/auth';
@@ -43,6 +44,17 @@ const turnstile = turnstileMiddleware({
 
 const app = express();
 const port = process.env.PORT || 3000;
+
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      "default-src": ["'self'"],
+      "script-src": ["'self'", "'unsafe-inline'", "challenges.cloudflare.com"],
+      "frame-src": ["'self'", "'unsafe-inline'", "challenges.cloudflare.com"],
+      "style-src": ["'self'", "'unsafe-inline'"]
+    }
+  }
+})); // Set security HTTP headers
 
 app.use(express.json());
 
@@ -136,7 +148,6 @@ app.post('/search', turnstile, async (req, res) => {
     console.error('Search error:', error);
     return res.status(500).json({
       error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Unknown error',
     });
   }
 });
@@ -189,7 +200,6 @@ app.post('/ingest', verifyWorkerAuth, async (req, res) => {
     console.error('Ingestion endpoint error:', error);
     return res.status(500).json({
       error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Unknown error',
     });
   }
 });
@@ -259,7 +269,7 @@ app.post('/ingest-updates', verifyWorkerAuth, async (req, res) => {
       } catch (error) {
         failed.push({
           articleId: item.articleId,
-          error: error instanceof Error ? error.message : 'Unknown error'
+          error: 'Unknown error'
         });
       }
     }
@@ -286,7 +296,6 @@ app.post('/ingest-updates', verifyWorkerAuth, async (req, res) => {
     console.error('Update ingestion endpoint error:', error);
     return res.status(500).json({
       error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Unknown error',
     });
   }
 });

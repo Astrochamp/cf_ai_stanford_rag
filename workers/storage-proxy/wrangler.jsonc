@@ -15,14 +15,14 @@
 			"binding": "d1",
 			"database_name": "sep-rag",
 			"database_id": "19f5ad99-7539-4ccc-a659-0ba1277aae5d",
-			"remote": false
+			"remote": true
 		}
 	],
   "r2_buckets": [
     {
       "binding": "r2",
       "bucket_name": "sep-articles",
-      "remote": false
+      "remote": true
     }
   ],
 	"vectorize": [
@@ -55,7 +55,10 @@
 	 * Environment Variables
 	 * https://developers.cloudflare.com/workers/wrangler/configuration/#environment-variables
 	 */
-	// "vars": { "MY_VARIABLE": "production_value" }
+	"vars": {
+    "JWT_AUDIENCE": "",
+    "EXPRESS_SERVER_URL": ""
+  }
 	/**
 	 * Note: Use secrets to store sensitive data.
 	 * https://developers.cloudflare.com/workers/configuration/secrets/
