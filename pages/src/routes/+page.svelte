@@ -30,6 +30,11 @@
     /\((UNSUPPORTED BY PROVIDED SOURCES|[A-Za-z0-9_-]+\/\d+(\.\d+)*\/chunk-\d+(\s*;\s*[A-Za-z0-9_-]+\/\d+(\.\d+)*\/chunk-\d+)*)\)/g;
   const validSourceIdPattern = /^[A-Za-z0-9_-]+\/\d+(\.\d+)*\/chunk-\d+$/;
 
+  // Helper function to remove citations from quotes
+  function removeCitationsFromQuote(text: string): string {
+    return text.replace(citationRegex, "").trim();
+  }
+
   // Configure marked for better output
   marked.setOptions({
     breaks: true,
@@ -439,8 +444,12 @@
             type="submit"
             disabled={!query.trim() || isLoading || isOverLimit}
             class="px-6 py-3 h-[50px] shrink-0 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-colors flex items-center gap-2 {isOverLimit
-              ? 'bg-red-600 hover:bg-red-700 disabled:bg-red-300'
-              : 'bg-amber-600 hover:bg-amber-700 disabled:bg-stone-300'}"
+              ? isDark
+                ? 'bg-red-700 hover:bg-red-800 disabled:bg-red-900'
+                : 'bg-red-600 hover:bg-red-700 disabled:bg-red-300'
+              : isDark
+                ? 'bg-amber-700 hover:bg-amber-800 disabled:bg-stone-700'
+                : 'bg-amber-600 hover:bg-amber-700 disabled:bg-stone-300'}"
           >
             {#if isLoading}
               <svg class="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
@@ -580,9 +589,9 @@
             ? 'bg-stone-800 border-stone-700'
             : 'bg-white border-stone-200'}"
         >
-          <div class="flex items-center gap-3">
+          <div class="flex items-start gap-3">
             <svg
-              class="animate-spin h-6 w-6 text-amber-600"
+              class="animate-spin h-6 w-6 text-amber-600 mt-0.5"
               fill="none"
               viewBox="0 0 24 24"
             >
@@ -600,11 +609,22 @@
                 d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
               ></path>
             </svg>
-            <span
-              class="text-lg {isDark ? 'text-stone-300' : 'text-stone-700'}"
-            >
-              Searching the Stanford Encyclopedia of Philosophy...
-            </span>
+            <div>
+              <span
+                class="text-lg block {isDark
+                  ? 'text-stone-300'
+                  : 'text-stone-700'}"
+              >
+                Searching the Stanford Encyclopedia of Philosophy...
+              </span>
+              <span
+                class="text-xs block mt-1 {isDark
+                  ? 'text-stone-400'
+                  : 'text-stone-600'}"
+              >
+                This may take a minute or two.
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -663,7 +683,7 @@
             </div>
 
             <!-- Answer Content -->
-            <div class="px-6 py-5">
+            <div class="p-6 pt-0">
               <div
                 class="prose max-w-none {isDark
                   ? 'prose-invert prose-stone'
@@ -782,7 +802,11 @@
                                   ? 'text-stone-300'
                                   : 'text-stone-700'}"
                               >
-                                "{@html parseTeX(evidence.verbatim_quote)}"
+                                "{@html parseTeX(
+                                  removeCitationsFromQuote(
+                                    evidence.verbatim_quote,
+                                  ),
+                                )}"
                               </div>
                             </div>
                             <!-- <div class="mb-2">
@@ -1105,5 +1129,43 @@
 
   :global(.highlight-source) {
     animation: highlight-pulse 1s ease-in-out 2;
+  }
+
+  /* Custom scrollbar styling for textarea */
+  textarea::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  textarea::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  textarea::-webkit-scrollbar-thumb {
+    background-color: rgba(120, 113, 108, 0.3);
+    border-radius: 4px;
+    transition: background-color 0.2s ease;
+  }
+
+  textarea::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(120, 113, 108, 0.5);
+  }
+
+  /* Dark mode scrollbar */
+  :global(.dark) textarea::-webkit-scrollbar-thumb {
+    background-color: rgba(214, 211, 209, 0.2);
+  }
+
+  :global(.dark) textarea::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(214, 211, 209, 0.3);
+  }
+
+  /* Firefox scrollbar styling */
+  textarea {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(120, 113, 108, 0.3) transparent;
+  }
+
+  :global(.dark) textarea {
+    scrollbar-color: rgba(214, 211, 209, 0.2) transparent;
   }
 </style>
