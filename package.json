@@ -1,5 +1,8 @@
 {
   "license": "CC-BY-NC-SA-4.0",
+  "scripts": {
+    "ingest": "ts-node scripts/run-initial-ingestion.ts"
+  },
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "ts-node": "^10.9.2",
