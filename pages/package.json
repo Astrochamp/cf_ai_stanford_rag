@@ -25,6 +25,7 @@
 	},
 	"dependencies": {
 		"@sveltejs/adapter-static": "^3.0.10",
+		"katex": "^0.16.25",
 		"marked": "^16.4.1"
 	}
 }

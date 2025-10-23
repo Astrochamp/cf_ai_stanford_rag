@@ -1,7 +1,79 @@
+import katex from "katex";
 import type { UsedEvidenceItem } from "./types";
 
 interface ParsedSources {
   used_evidence: UsedEvidenceItem[];
+}
+
+/**
+ * Parses TeX/LaTeX math expressions in text and renders them using KaTeX.
+ * Supports both inline math (single backslash) and display math (double backslash).
+ * 
+ * @param text The text containing TeX expressions
+ * @returns The text with TeX expressions converted to HTML
+ */
+export function parseTeX(text: string): string {
+  if (!text) return text;
+
+  // First, handle display math: \\( ... \\)
+  // We need to escape the backslashes in the regex
+  text = text.replace(/\\\\\((.+?)\\\\\)/g, (match, math) => {
+    try {
+      return katex.renderToString(math.trim(), {
+        displayMode: false,
+        throwOnError: false,
+        strict: false,
+      });
+    } catch (e) {
+      console.error("KaTeX display math error:", e);
+      return match;
+    }
+  });
+
+  // Handle inline math: \( ... \)
+  text = text.replace(/\\\((.+?)\\\)/g, (match, math) => {
+    try {
+      return katex.renderToString(math.trim(), {
+        displayMode: false,
+        throwOnError: false,
+        strict: false,
+      });
+    } catch (e) {
+      console.error("KaTeX inline math error:", e);
+      return match;
+    }
+  });
+
+  // Handle block/display math: $$ ... $$
+  text = text.replace(/\$\$(.+?)\$\$/gs, (match, math) => {
+    try {
+      return katex.renderToString(math.trim(), {
+        displayMode: true,
+        throwOnError: false,
+        strict: false,
+      });
+    } catch (e) {
+      console.error("KaTeX block math error:", e);
+      return match;
+    }
+  });
+
+  // Handle inline math: $ ... $ (but not $$)
+  // Use negative lookahead and lookbehind to avoid matching $$
+  text = text.replace(/(?<!\$)\$(?!\$)(.+?)(?<!\$)\$(?!\$)/g, (match, math) => {
+    try {
+      return katex.renderToString(math.trim(), {
+        displayMode: false,
+        throwOnError: false,
+        strict: false,
+      });
+    } catch (e) {
+      console.error("KaTeX inline math error:", e);
+      return match;
+    }
+  });
+
+  return text;
 }
 
 /**

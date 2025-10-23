@@ -1,6 +1,9 @@
 /* Import Google Fonts first */
 @import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,300;0,400;0,600;0,700;1,400&family=Inter:wght@300;400;500;600;700&display=swap');
 
+/* Import KaTeX CSS for math rendering */
+@import 'katex/dist/katex.min.css';
+
 /* Tailwind imports */
 @import 'tailwindcss';
 @plugin '@tailwindcss/typography';
@@ -36,4 +39,64 @@ html {
 kbd {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.875em;
+}
+
+/* KaTeX styling customization */
+.katex {
+  font-size: 1.05em;
+}
+
+.katex-display {
+  margin: 1em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* Ensure KaTeX works in both light and dark modes */
+.katex .mathnormal {
+  font-style: italic;
+}
+
+/* Make KaTeX readable in dark mode by inheriting color */
+.prose-invert .katex {
+  color: inherit;
+}
+
+/* Citation link styling */
+.citation {
+  text-decoration: none;
+  font-weight: 600;
+  color: rgb(217, 119, 6); /* amber-600 */
+  transition: color 0.2s;
+}
+
+.citation:hover {
+  color: rgb(180, 83, 9); /* amber-700 */
+}
+
+.citation.unsupported {
+  color: rgb(220, 38, 38); /* red-600 */
+  cursor: help;
+}
+
+.prose-invert .citation {
+  color: rgb(251, 191, 36); /* amber-400 */
+}
+
+.prose-invert .citation:hover {
+  color: rgb(252, 211, 77); /* amber-300 */
+}
+
+/* Source highlight animation */
+@keyframes highlight-pulse {
+  0%, 100% {
+    background-color: transparent;
+  }
+  50% {
+    background-color: rgba(251, 191, 36, 0.2); /* amber with opacity */
+  }
+}
+
+.highlight-source {
+  animation: highlight-pulse 2s ease-in-out;
 }
