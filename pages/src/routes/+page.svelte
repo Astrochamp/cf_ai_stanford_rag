@@ -15,6 +15,7 @@
   marked.setOptions({
     breaks: true,
     gfm: true,
+    async: false,
   });
 
   const exampleQuestions = [
@@ -32,6 +33,26 @@
     } else {
       isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
     }
+
+    // Handle citation link clicks
+    const handleCitationClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (
+        target.classList.contains("citation") &&
+        !target.classList.contains("unsupported")
+      ) {
+        e.preventDefault();
+        const sourceId = target.getAttribute("data-source-id");
+        if (sourceId) {
+          scrollToSource(sourceId);
+        }
+      }
+    };
+
+    document.addEventListener("click", handleCitationClick);
+    return () => {
+      document.removeEventListener("click", handleCitationClick);
+    };
   });
 
   function toggleTheme() {
@@ -121,6 +142,75 @@
       unusedSources,
       evidenceMap,
     };
+  }
+
+  // Helper function to parse and convert citations to clickable links
+  function parseCitations(text: string | Promise<string>): string {
+    // Ensure text is a string (marked can return Promise in some configs)
+    const textStr = typeof text === "string" ? text : "";
+
+    // Create a map to track unique citation numbers for each source ID
+    const sourceIdToCitationNumber = new Map<string, number>();
+    let nextCitationNumber = 1;
+
+    // More specific regex that matches:
+    // 1. (UNSUPPORTED BY PROVIDED SOURCES) - exact match
+    // 2. Source IDs in format: (word/1.2/chunk-N) or (word/2.3.4/chunk-N; word/5/chunk-N)
+    //    Source IDs contain alphanumeric, hyphens, underscores, forward slashes
+    //    Multiple sources are separated by semicolons
+    const citationRegex =
+      /\((UNSUPPORTED BY PROVIDED SOURCES|([a-zA-Z\d\_\-]+\/\d(\.*\d?)*\/chunk-\d+)(;\s*)*([a-zA-Z\d\_\-]+\/\d(\.*\d?)*\/chunk-\d+)*)\)/g;
+
+    return textStr.replace(citationRegex, (match, content) => {
+      // Check if it's the unsupported claim marker
+      if (content.trim() === "UNSUPPORTED BY PROVIDED SOURCES") {
+        return `<span class="citation unsupported" title="This claim is not supported by the provided sources">[citation needed]</span>`;
+      }
+
+      // Split by semicolon for multiple citations
+      const sourceIds = content.split(";").map((id: string) => id.trim());
+
+      // Validate that all source IDs match the expected format (e.g., "word/1.2.3/chunk-N")
+      const validSourceIdPattern = /^[a-zA-Z\d\_\-]+\/\d(\.*\d?)*\/chunk-\d+$/;
+      const allValid = sourceIds.every((id: string) =>
+        validSourceIdPattern.test(id),
+      );
+
+      // If not all IDs are valid, don't treat this as a citation
+      if (!allValid) {
+        return match; // Return the original text unchanged
+      }
+
+      // Create clickable citation links with unique numbers
+      const citationLinks = sourceIds
+        .map((sourceId: string) => {
+          // Get or assign a unique citation number for this source
+          if (!sourceIdToCitationNumber.has(sourceId)) {
+            sourceIdToCitationNumber.set(sourceId, nextCitationNumber++);
+          }
+          const citationNumber = sourceIdToCitationNumber.get(sourceId)!;
+
+          const safeId = sourceId.replace(/[^a-zA-Z0-9-]/g, "_");
+          return `<a href="#source-${safeId}" class="citation" data-source-id="${sourceId}" title="Jump to source: ${sourceId}">[${citationNumber}]</a>`;
+        })
+        .join("");
+
+      return citationLinks;
+    });
+  }
+
+  // Function to scroll to a source element
+  function scrollToSource(sourceId: string) {
+    const safeId = sourceId.replace(/[^a-zA-Z0-9-]/g, "_");
+    const element = document.getElementById(`source-${safeId}`);
+    if (element) {
+      element.scrollIntoView({ behavior: "smooth", block: "center" });
+      // Add a highlight effect
+      element.classList.add("highlight-source");
+      setTimeout(() => {
+        element.classList.remove("highlight-source");
+      }, 2000);
+    }
   }
 </script>
 
@@ -365,7 +455,7 @@
                         {message.content}
                       </p>
                     {:else}
-                      {@html marked(message.content)}
+                      {@html parseCitations(marked(message.content))}
                     {/if}
                   </div>
                 </div>
@@ -386,7 +476,12 @@
                       </p>
                       {#each usedSources as source}
                         {@const evidence = evidenceMap.get(source.id)}
+                        {@const safeId = source.id.replace(
+                          /[^a-zA-Z0-9-]/g,
+                          "_",
+                        )}
                         <div
+                          id="source-{safeId}"
                           class="block p-3 rounded-lg border transition-all {isDark
                             ? 'border-amber-700 bg-amber-950/30'
                             : 'border-amber-200 bg-amber-50/50'}"
@@ -400,7 +495,10 @@
                                   ? 'text-stone-200'
                                   : 'text-stone-900'}"
                               >
-                                {source.doc_title}
+                                {(source.doc_title ?? "").replace(
+                                  /\s+\(Stanford Encyclopedia of Philosophy\)$/,
+                                  "",
+                                )}
                               </h4>
                               {#if source.section_heading}
                                 <p
@@ -411,13 +509,6 @@
                                   § {source.section_heading}
                                 </p>
                               {/if}
-                            </div>
-                            <div
-                              class="shrink-0 text-xs font-mono px-2 py-1 rounded {isDark
-                                ? 'bg-amber-900 text-amber-400'
-                                : 'bg-amber-200 text-amber-800'}"
-                            >
-                              chunk {source.chunk_index}
                             </div>
                           </div>
                           {#if evidence}
@@ -496,7 +587,12 @@
                       <!-- Unused Sources (Collapsed by Default) -->
                       {#if showUnusedSources[message.id]}
                         {#each unusedSources as source}
+                          {@const safeId = source.id.replace(
+                            /[^a-zA-Z0-9-]/g,
+                            "_",
+                          )}
                           <div
+                            id="source-{safeId}"
                             class="block p-3 rounded-lg border transition-all {isDark
                               ? 'border-stone-700 bg-stone-800/50'
                               : 'border-stone-200 bg-stone-50/50'}"
@@ -510,7 +606,10 @@
                                     ? 'text-stone-200'
                                     : 'text-stone-900'}"
                                 >
-                                  {source.doc_title}
+                                  {(source.doc_title ?? "").replace(
+                                    /\s+\(Stanford Encyclopedia of Philosophy\)$/,
+                                    "",
+                                  )}
                                 </h4>
                                 {#if source.section_heading}
                                   <p
@@ -521,13 +620,6 @@
                                     § {source.section_heading}
                                   </p>
                                 {/if}
-                              </div>
-                              <div
-                                class="shrink-0 text-xs font-mono px-2 py-1 rounded {isDark
-                                  ? 'bg-stone-700 text-stone-400'
-                                  : 'bg-stone-200 text-stone-600'}"
-                              >
-                                chunk {source.chunk_index}
                               </div>
                             </div>
                             <p
@@ -807,5 +899,57 @@
     padding-left: 1em;
     font-style: italic;
     margin: 1em 0;
+  }
+
+  /* Citation link styling */
+  :global(.citation) {
+    display: inline-block;
+    font-size: 0.75em;
+    font-weight: 600;
+    color: #d97706;
+    background-color: rgba(217, 119, 6, 0.1);
+    border: 1px solid rgba(217, 119, 6, 0.3);
+    border-radius: 0.25rem;
+    padding: 0.1em 0.35em;
+    margin: 0 0.15em;
+    text-decoration: none;
+    vertical-align: super;
+    line-height: 1;
+    transition: all 0.2s ease;
+    cursor: pointer;
+  }
+
+  :global(.citation:hover) {
+    background-color: rgba(217, 119, 6, 0.2);
+    border-color: rgba(217, 119, 6, 0.5);
+    transform: translateY(-1px);
+  }
+
+  :global(.citation.unsupported) {
+    color: #dc2626;
+    background-color: rgba(220, 38, 38, 0.1);
+    border: 1px solid rgba(220, 38, 38, 0.3);
+    cursor: help;
+    font-style: italic;
+  }
+
+  :global(.citation.unsupported:hover) {
+    background-color: rgba(220, 38, 38, 0.2);
+    border-color: rgba(220, 38, 38, 0.5);
+  }
+
+  /* Highlight effect for scrolled-to sources */
+  @keyframes highlight-pulse {
+    0%,
+    100% {
+      box-shadow: 0 0 0 0 rgba(217, 119, 6, 0);
+    }
+    50% {
+      box-shadow: 0 0 0 8px rgba(217, 119, 6, 0.3);
+    }
+  }
+
+  :global(.highlight-source) {
+    animation: highlight-pulse 1s ease-in-out 2;
   }
 </style>
