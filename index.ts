@@ -8,6 +8,7 @@ import { createEvidenceJson, EvidenceItem, generateResponse } from './lib/genera
 import { hybridSearch } from './lib/hybrid-search';
 import { processIngestionQueue } from './lib/ingestion';
 import { addToIngestionQueue } from './lib/queue';
+import { classifyQueryRelevance } from './lib/security';
 import { getArticleUpdatedDate } from './lib/worker-api';
 
 
@@ -70,6 +71,16 @@ app.post('/search', async (req, res) => {
 
     if (topK < 1 || topK > 12 || !Number.isInteger(topK)) {
       return res.status(400).json({ error: 'topK must be an integer between 1 and 12 (inclusive)' });
+    }
+
+    // Classify query relevance before proceeding with RAG
+    const relevance = await classifyQueryRelevance(query, openai);
+
+    if (relevance === 'not_relevant') {
+      return res.status(400).json({
+        error: 'Query not relevant',
+        message: 'Your query does not appear to be related to philosophy. This search system is designed for philosophical topics, theories, arguments, and related academic content.'
+      });
     }
 
     const results = await hybridSearch(

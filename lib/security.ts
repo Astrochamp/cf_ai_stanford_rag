@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 
-async function classifyQueryRelevance(
+export async function classifyQueryRelevance(
   query: string,
   openai: OpenAI
 ): Promise<'relevant' | 'not_relevant'> {
