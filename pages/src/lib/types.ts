@@ -24,6 +24,7 @@ export interface Message {
   sources?: Source[];
   usedEvidence?: UsedEvidenceItem[];
   timestamp: Date;
+  query?: string; // The query that generated this result
 }
 
 export interface UsedEvidenceItem {

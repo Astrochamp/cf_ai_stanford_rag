@@ -6,7 +6,7 @@
   import { onMount } from "svelte";
 
   let query = $state("");
-  let messages = $state<Message[]>([]);
+  let results = $state<Message[]>([]);
   let isLoading = $state(false);
   let isDark = $state(false);
   let inputElement: HTMLTextAreaElement;
@@ -25,6 +25,10 @@
         ? "text-amber-600 dark:text-amber-400"
         : "",
   );
+
+  const citationRegex =
+    /\((UNSUPPORTED BY PROVIDED SOURCES|[A-Za-z0-9_-]+\/\d+(\.\d+)*\/chunk-\d+(\s*;\s*[A-Za-z0-9_-]+\/\d+(\.\d+)*\/chunk-\d+)*)\)/g;
+  const validSourceIdPattern = /^[A-Za-z0-9_-]+\/\d+(\.\d+)*\/chunk-\d+$/;
 
   // Configure marked for better output
   marked.setOptions({
@@ -85,15 +89,7 @@
   async function handleSubmit() {
     if (!query.trim() || isLoading || isOverLimit) return;
 
-    const userMessage: Message = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: query.trim(),
-      timestamp: new Date(),
-    };
-
-    messages = [...messages, userMessage];
-    const currentQuery = query;
+    const currentQuery = query.trim();
     query = "";
     isLoading = true;
 
@@ -103,26 +99,29 @@
     try {
       const response = await queryOracle(currentQuery);
 
-      const assistantMessage: Message = {
+      const result: Message = {
         id: crypto.randomUUID(),
         role: "assistant",
         content: response.answer,
         sources: response.sources,
         usedEvidence: response.usedEvidence,
         timestamp: response.timestamp,
+        query: currentQuery, // Store the query that generated this result
       };
 
-      messages = [...messages, assistantMessage];
+      // Add new result at the beginning (most recent first)
+      results = [result, ...results];
     } catch (error) {
       console.error("Error querying oracle:", error);
-      const errorMessage: Message = {
+      const errorResult: Message = {
         id: crypto.randomUUID(),
         role: "assistant",
         content:
           "I apologize, but I encountered an error processing your query. Please try again.",
         timestamp: new Date(),
+        query: currentQuery,
       };
-      messages = [...messages, errorMessage];
+      results = [errorResult, ...results];
     } finally {
       isLoading = false;
       setTimeout(() => inputElement?.focus(), 0);
@@ -142,7 +141,7 @@
   }
 
   function clearConversation() {
-    messages = [];
+    results = [];
     query = "";
   }
 
@@ -186,9 +185,6 @@
     let nextCitationNumber = 1;
 
     // Match citations in the same format as parseCitations
-    const citationRegex =
-      /\((UNSUPPORTED BY PROVIDED SOURCES|([a-zA-Z\d\_\-]+\/\d(\.*\d?)*\/chunk-\d+)(;\s*)*([a-zA-Z\d\_\-]+\/\d(\.*\d?)*\/chunk-\d+)*)\)/g;
-
     let match;
     while ((match = citationRegex.exec(text)) !== null) {
       const content = match[1];
@@ -202,7 +198,6 @@
       const sourceIds = content.split(";").map((id: string) => id.trim());
 
       // Validate source IDs
-      const validSourceIdPattern = /^[a-zA-Z\d\_\-]+\/\d(\.*\d?)*\/chunk-\d+$/;
       const allValid = sourceIds.every((id: string) =>
         validSourceIdPattern.test(id),
       );
@@ -237,9 +232,6 @@
     // 2. Source IDs in format: (word/1.2/chunk-N) or (word/2.3.4/chunk-N; word/5/chunk-N)
     //    Source IDs contain alphanumeric, hyphens, underscores, forward slashes
     //    Multiple sources are separated by semicolons
-    const citationRegex =
-      /\((UNSUPPORTED BY PROVIDED SOURCES|([a-zA-Z\d\_\-]+\/\d(\.*\d?)*\/chunk-\d+)(;\s*)*([a-zA-Z\d\_\-]+\/\d(\.*\d?)*\/chunk-\d+)*)\)/g;
-
     return textStr.replace(citationRegex, (match, content) => {
       // Check if it's the unsupported claim marker
       if (content.trim() === "UNSUPPORTED BY PROVIDED SOURCES") {
@@ -250,7 +242,6 @@
       const sourceIds = content.split(";").map((id: string) => id.trim());
 
       // Validate that all source IDs match the expected format (e.g., "word/1.2.3/chunk-N")
-      const validSourceIdPattern = /^[a-zA-Z\d\_\-]+\/\d(\.*\d?)*\/chunk-\d+$/;
       const allValid = sourceIds.every((id: string) =>
         validSourceIdPattern.test(id),
       );
@@ -397,14 +388,14 @@
               </svg>
             {/if}
           </button>
-          {#if messages.length > 0}
+          {#if results.length > 0}
             <button
               onclick={clearConversation}
               class="text-sm transition-colors px-4 py-2 rounded-lg {isDark
                 ? 'text-stone-400 hover:text-stone-100 hover:bg-stone-800'
                 : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100'}"
             >
-              Clear
+              Clear All
             </button>
           {/if}
         </div>
@@ -412,8 +403,105 @@
     </div>
   </header>
 
-  <main class="max-w-5xl mx-auto px-6 py-12">
-    {#if messages.length === 0}
+  <main class="max-w-5xl mx-auto px-6 py-8">
+    <!-- Search Input Area (Always at top) -->
+    <div class="mb-8">
+      <div
+        class="rounded-2xl shadow-lg border p-5 {isDark
+          ? 'bg-stone-800 border-stone-700'
+          : 'bg-white border-stone-200'}"
+      >
+        <form
+          onsubmit={(e) => {
+            e.preventDefault();
+            handleSubmit();
+          }}
+          class="flex gap-3 items-end"
+        >
+          <textarea
+            bind:this={inputElement}
+            bind:value={query}
+            oninput={autoResizeTextarea}
+            onkeydown={handleKeydown}
+            placeholder="Ask a philosophical question..."
+            rows="1"
+            style="max-height: 400px; overflow-y: auto;"
+            class="flex-1 resize-none rounded-lg px-4 py-3 border focus:outline-none focus:ring-2 focus:border-transparent font-light {isOverLimit
+              ? isDark
+                ? 'border-red-500 focus:ring-red-500 bg-stone-900 text-stone-100 placeholder:text-stone-500'
+                : 'border-red-500 focus:ring-red-500 bg-white text-stone-900 placeholder:text-stone-400'
+              : isDark
+                ? 'border-stone-600 focus:ring-amber-500 bg-stone-900 text-stone-100 placeholder:text-stone-500'
+                : 'border-stone-300 focus:ring-amber-500 bg-white text-stone-900 placeholder:text-stone-400'}"
+            disabled={isLoading}
+          ></textarea>
+          <button
+            type="submit"
+            disabled={!query.trim() || isLoading || isOverLimit}
+            class="px-6 py-3 h-[50px] shrink-0 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-colors flex items-center gap-2 {isOverLimit
+              ? 'bg-red-600 hover:bg-red-700 disabled:bg-red-300'
+              : 'bg-amber-600 hover:bg-amber-700 disabled:bg-stone-300'}"
+          >
+            {#if isLoading}
+              <svg class="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                <circle
+                  class="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  stroke-width="4"
+                ></circle>
+                <path
+                  class="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                ></path>
+              </svg>
+            {:else}
+              <svg
+                class="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                />
+              </svg>
+            {/if}
+          </button>
+        </form>
+        <div class="flex items-center justify-between mt-3 text-xs">
+          <p class="text-center {isDark ? 'text-stone-500' : 'text-stone-500'}">
+            Press <kbd
+              class="px-1.5 py-0.5 rounded border font-mono {isDark
+                ? 'bg-stone-900 border-stone-600'
+                : 'bg-stone-100 border-stone-300'}">Enter</kbd
+            >
+            to search,
+            <kbd
+              class="px-1.5 py-0.5 rounded border font-mono {isDark
+                ? 'bg-stone-900 border-stone-600'
+                : 'bg-stone-100 border-stone-300'}">Shift+Enter</kbd
+            > for new line
+          </p>
+          {#if showCharCounter}
+            <p class="font-mono font-semibold {charCountColor}">
+              {charCount}/{MAX_CHAR_LIMIT}
+              {#if isOverLimit}
+                <span class="ml-1">- Query too long</span>
+              {/if}
+            </p>
+          {/if}
+        </div>
+      </div>
+    </div>
+
+    {#if results.length === 0 && !isLoading}
       <!-- Welcome Screen -->
       <div class="text-center mb-16 mt-8">
         <div
@@ -482,107 +570,129 @@
           {/each}
         </div>
       </div>
-    {:else}
-      <!-- Conversation -->
-      <div class="space-y-8 mb-12">
-        {#each messages as message (message.id)}
-          <div
-            class="flex gap-4 {message.role === 'user'
-              ? 'justify-end'
-              : 'justify-start'}"
-          >
-            <div
-              class="flex gap-4 max-w-4xl {message.role === 'user'
-                ? 'flex-row-reverse'
-                : 'flex-row'}"
+    {/if}
+
+    <!-- Loading State -->
+    {#if isLoading}
+      <div class="mb-8">
+        <div
+          class="rounded-xl border shadow-sm p-6 {isDark
+            ? 'bg-stone-800 border-stone-700'
+            : 'bg-white border-stone-200'}"
+        >
+          <div class="flex items-center gap-3">
+            <svg
+              class="animate-spin h-6 w-6 text-amber-600"
+              fill="none"
+              viewBox="0 0 24 24"
             >
-              <!-- Avatar -->
-              <div class="shrink-0">
-                {#if message.role === "user"}
-                  <div
-                    class="w-10 h-10 rounded-full bg-stone-600 flex items-center justify-center"
-                  >
-                    <svg
-                      class="w-6 h-6 text-white"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-                      />
-                    </svg>
-                  </div>
-                {:else}
-                  <div
-                    class="w-10 h-10 rounded-full bg-amber-600 flex items-center justify-center"
-                  >
-                    <svg
-                      class="w-6 h-6 text-white"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
-                      />
-                    </svg>
-                  </div>
-                {/if}
-              </div>
+              <circle
+                class="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                stroke-width="4"
+              ></circle>
+              <path
+                class="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+              ></path>
+            </svg>
+            <span
+              class="text-lg {isDark ? 'text-stone-300' : 'text-stone-700'}"
+            >
+              Searching the Stanford Encyclopedia of Philosophy...
+            </span>
+          </div>
+        </div>
+      </div>
+    {/if}
 
-              <!-- Message Content -->
-              <div class="flex-1">
-                <div
-                  class="px-6 py-4 {message.role === 'user'
-                    ? isDark
-                      ? 'bg-stone-700 text-white rounded-2xl rounded-tr-sm'
-                      : 'bg-stone-700 text-white rounded-2xl rounded-tr-sm'
-                    : isDark
-                      ? 'bg-stone-800 border border-stone-700 rounded-2xl rounded-tl-sm shadow-sm text-stone-100'
-                      : 'bg-white border border-stone-200 rounded-2xl rounded-tl-sm shadow-sm'}"
+    <!-- Results Section -->
+    {#if results.length > 0}
+      <div class="space-y-6">
+        <h2
+          class="text-lg font-semibold {isDark
+            ? 'text-stone-300'
+            : 'text-stone-700'}"
+        >
+          {results.length}
+          {results.length === 1 ? "Result" : "Results"}
+        </h2>
+
+        {#each results as result (result.id)}
+          <article
+            class="rounded-xl border shadow-sm overflow-hidden {isDark
+              ? 'bg-stone-800 border-stone-700'
+              : 'bg-white border-stone-200'}"
+          >
+            <!-- Query Header -->
+            <div
+              class="px-6 py-4 border-b {isDark
+                ? 'bg-stone-800/50 border-stone-700'
+                : 'bg-stone-50 border-stone-200'}"
+            >
+              <div class="flex items-start gap-3">
+                <svg
+                  class="w-5 h-5 mt-0.5 shrink-0 {isDark
+                    ? 'text-amber-400'
+                    : 'text-amber-600'}"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
                 >
-                  <div
-                    class="prose max-w-none {message.role === 'user'
-                      ? 'prose-invert'
-                      : isDark
-                        ? 'prose-invert prose-stone'
-                        : 'prose-stone'}"
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+                <div class="flex-1 min-w-0">
+                  <p
+                    class="font-medium text-base leading-relaxed {isDark
+                      ? 'text-stone-100'
+                      : 'text-stone-900'}"
                   >
-                    {#if message.role === "user"}
-                      <p class="whitespace-pre-wrap leading-relaxed">
-                        {message.content}
-                      </p>
-                    {:else}
-                      {@html renderContent(message.content)}
-                    {/if}
-                  </div>
+                    {result.query || "Query"}
+                  </p>
                 </div>
+              </div>
+            </div>
 
-                <!-- Sources -->
-                {#if message.sources && message.sources.length > 0}
-                  {@const {
-                    usedSources,
-                    unusedSources,
-                    evidenceMap,
-                    citationOrder,
-                  } = categorizeSources(message)}
-                  <div class="mt-4 space-y-2">
-                    <!-- Used Sources Section -->
-                    {#if usedSources.length > 0}
-                      <p
-                        class="text-xs font-semibold uppercase tracking-wider {isDark
-                          ? 'text-stone-400'
-                          : 'text-stone-600'}"
-                      >
-                        Evidence Used ({usedSources.length})
-                      </p>
+            <!-- Answer Content -->
+            <div class="px-6 py-5">
+              <div
+                class="prose max-w-none {isDark
+                  ? 'prose-invert prose-stone'
+                  : 'prose-stone'}"
+              >
+                {@html renderContent(result.content)}
+              </div>
+            </div>
+
+            <!-- Sources -->
+            {#if result.sources && result.sources.length > 0}
+              {@const {
+                usedSources,
+                unusedSources,
+                evidenceMap,
+                citationOrder,
+              } = categorizeSources(result)}
+              <div class="px-6 pb-5 space-y-3">
+                <!-- Used Sources Section -->
+                {#if usedSources.length > 0}
+                  <div>
+                    <p
+                      class="text-xs font-semibold uppercase tracking-wider mb-3 {isDark
+                        ? 'text-stone-400'
+                        : 'text-stone-600'}"
+                    >
+                      Evidence Used ({usedSources.length})
+                    </p>
+                    <div class="space-y-2">
                       {#each usedSources as source}
                         {@const evidence = evidenceMap.get(source.id)}
                         {@const safeId = source.id.replace(
@@ -701,38 +811,42 @@
                           </p>
                         </div>
                       {/each}
-                    {/if}
+                    </div>
+                  </div>
+                {/if}
 
-                    <!-- Toggle for Unused Sources -->
-                    {#if unusedSources.length > 0}
-                      <button
-                        onclick={() => toggleUnusedSources(message.id)}
-                        class="w-full text-left text-xs font-semibold uppercase tracking-wider flex items-center gap-2 transition-colors py-2 {isDark
-                          ? 'text-stone-400 hover:text-stone-300'
-                          : 'text-stone-600 hover:text-stone-700'}"
+                <!-- Toggle for Unused Sources -->
+                {#if unusedSources.length > 0}
+                  <div>
+                    <button
+                      onclick={() => toggleUnusedSources(result.id)}
+                      class="w-full text-left text-xs font-semibold uppercase tracking-wider flex items-center gap-2 transition-colors py-2 {isDark
+                        ? 'text-stone-400 hover:text-stone-300'
+                        : 'text-stone-600 hover:text-stone-700'}"
+                    >
+                      Show unused sources ({unusedSources.length})
+                      <svg
+                        class="w-4 h-4 transition-transform {showUnusedSources[
+                          result.id
+                        ]
+                          ? 'rotate-180'
+                          : ''}"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
                       >
-                        Show unused sources ({unusedSources.length})
-                        <svg
-                          class="w-4 h-4 transition-transform {showUnusedSources[
-                            message.id
-                          ]
-                            ? 'rotate-180'
-                            : ''}"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M19 9l-7 7-7-7"
-                          />
-                        </svg>
-                      </button>
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M19 9l-7 7-7-7"
+                        />
+                      </svg>
+                    </button>
 
-                      <!-- Unused Sources (Collapsed by Default) -->
-                      {#if showUnusedSources[message.id]}
+                    <!-- Unused Sources (Collapsed by Default) -->
+                    {#if showUnusedSources[result.id]}
+                      <div class="space-y-2 mt-2">
                         {#each unusedSources as source}
                           {@const safeId = source.id.replace(
                             /[^a-zA-Z0-9-]/g,
@@ -811,163 +925,16 @@
                             </p>
                           </div>
                         {/each}
-                      {/if}
+                      </div>
                     {/if}
                   </div>
                 {/if}
               </div>
-            </div>
-          </div>
+            {/if}
+          </article>
         {/each}
-
-        {#if isLoading}
-          <div class="flex gap-4">
-            <div class="shrink-0">
-              <div
-                class="w-10 h-10 rounded-full bg-amber-600 flex items-center justify-center"
-              >
-                <svg
-                  class="w-6 h-6 text-white"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
-                  />
-                </svg>
-              </div>
-            </div>
-            <div
-              class="rounded-2xl rounded-tl-sm shadow-sm px-6 py-4 {isDark
-                ? 'bg-stone-800 border border-stone-700'
-                : 'bg-white border border-stone-200'}"
-            >
-              <div class="flex gap-1">
-                <div
-                  class="w-2 h-2 rounded-full animate-bounce {isDark
-                    ? 'bg-stone-500'
-                    : 'bg-stone-400'}"
-                  style="animation-l: 0ms"
-                ></div>
-                <div
-                  class="w-2 h-2 rounded-full animate-bounce {isDark
-                    ? 'bg-stone-500'
-                    : 'bg-stone-400'}"
-                  style="animation-l: 150ms"
-                ></div>
-                <div
-                  class="w-2 h-2 rounded-full animate-bounce {isDark
-                    ? 'bg-stone-500'
-                    : 'bg-stone-400'}"
-                  style="animation-l: 300ms"
-                ></div>
-              </div>
-            </div>
-          </div>
-        {/if}
       </div>
     {/if}
-
-    <!-- Input Area -->
-    <div class="sticky bottom-6">
-      <div
-        class="rounded-2xl shadow-lg border p-4 {isDark
-          ? 'bg-stone-800 border-stone-700'
-          : 'bg-white border-stone-200'}"
-      >
-        <form
-          onsubmit={(e) => {
-            e.preventDefault();
-            handleSubmit();
-          }}
-          class="flex gap-3 items-end"
-        >
-          <textarea
-            bind:this={inputElement}
-            bind:value={query}
-            oninput={autoResizeTextarea}
-            onkeydown={handleKeydown}
-            placeholder="Ask a philosophical question..."
-            rows="1"
-            style="max-height: 400px; overflow-y: auto;"
-            class="flex-1 resize-none rounded-lg px-4 py-3 border focus:outline-none focus:ring-2 focus:border-transparent font-light {isOverLimit
-              ? isDark
-                ? 'border-red-500 focus:ring-red-500 bg-stone-900 text-stone-100 placeholder:text-stone-500'
-                : 'border-red-500 focus:ring-red-500 bg-white text-stone-900 placeholder:text-stone-400'
-              : isDark
-                ? 'border-stone-600 focus:ring-amber-500 bg-stone-900 text-stone-100 placeholder:text-stone-500'
-                : 'border-stone-300 focus:ring-amber-500 bg-white text-stone-900 placeholder:text-stone-400'}"
-            disabled={isLoading}
-          ></textarea>
-          <button
-            type="submit"
-            disabled={!query.trim() || isLoading || isOverLimit}
-            class="px-6 py-3 h-[50px] shrink-0 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-colors flex items-center gap-2 {isOverLimit
-              ? 'bg-red-600 hover:bg-red-700 disabled:bg-red-300'
-              : 'bg-amber-600 hover:bg-amber-700 disabled:bg-stone-300'}"
-          >
-            {#if isLoading}
-              <svg class="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
-                <circle
-                  class="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  stroke-width="4"
-                ></circle>
-                <path
-                  class="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                ></path>
-              </svg>
-            {:else}
-              <svg
-                class="w-5 h-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M14 5l7 7m0 0l-7 7m7-7H3"
-                />
-              </svg>
-            {/if}
-          </button>
-        </form>
-        <div class="flex items-center justify-between mt-3 text-xs">
-          <p class="text-center {isDark ? 'text-stone-500' : 'text-stone-500'}">
-            Press <kbd
-              class="px-1.5 py-0.5 rounded border font-mono {isDark
-                ? 'bg-stone-900 border-stone-600'
-                : 'bg-stone-100 border-stone-300'}">Enter</kbd
-            >
-            to send,
-            <kbd
-              class="px-1.5 py-0.5 rounded border font-mono {isDark
-                ? 'bg-stone-900 border-stone-600'
-                : 'bg-stone-100 border-stone-300'}">Shift+Enter</kbd
-            > for new line
-          </p>
-          {#if showCharCounter}
-            <p class="font-mono font-semibold {charCountColor}">
-              {charCount}/{MAX_CHAR_LIMIT}
-              {#if isOverLimit}
-                <span class="ml-1">- Message too long</span>
-              {/if}
-            </p>
-          {/if}
-        </div>
-      </div>
-    </div>
   </main>
 
   <!-- Footer -->
