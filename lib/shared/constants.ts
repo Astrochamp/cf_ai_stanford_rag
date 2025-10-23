@@ -4,6 +4,7 @@
 
 export const articlesListURL = "https://plato.stanford.edu/published.html";
 export const baseArticleURL = "https://plato.stanford.edu/entries/";
+export const sepRssFeedURL = "https://plato.stanford.edu/rss/sep.xml";
 export const TEX_PATTERN = /(?:\\\(|\\\[)(.*?)(?:\\\)|\\\])/s;
 export const TABLE_REGEX = /<table[^>]*>[\s\S]*?<\/table>/gi;
 export const NESTED_LIST_PLACEHOLDER = '__NESTED_LIST__';

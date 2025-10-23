@@ -1,12 +1,14 @@
+import cors from 'cors';
 import 'dotenv/config';
 import express from 'express';
-import cors from 'cors';
 import { OpenAI } from "openai";
 import { createVerifyWorkerAuth } from './lib/auth';
+import { fetchArticlesList, fetchRssArticles } from './lib/fetch';
+import { createEvidenceJson, EvidenceItem, generateResponse } from './lib/generation';
 import { hybridSearch } from './lib/hybrid-search';
 import { processIngestionQueue } from './lib/ingestion';
 import { addToIngestionQueue } from './lib/queue';
-import { generateResponse, createEvidenceJson, EvidenceItem } from './lib/generation';
+import { getArticleUpdatedDate } from './lib/worker-api';
 
 
 function requireEnvVar(name: string): string {
@@ -109,6 +111,151 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
+/**
+ * POST /ingest
+ * Authenticated endpoint to begin article ingestion
+ * Requires valid JWT token from worker
+ */
+app.post('/ingest', verifyWorkerAuth, async (req, res) => {
+  try {
+    const articleIds = await fetchArticlesList();
+
+    // Add articles to ingestion queue
+    const queued: string[] = [];
+    const failed: { articleId: string; error: string; }[] = [];
+
+    for (const articleId of articleIds) {
+      try {
+        await addToIngestionQueue(articleId, dbWorkerUrl, privateKeyPem);
+        queued.push(articleId);
+      } catch (error) {
+        failed.push({
+          articleId,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        });
+      }
+    }
+
+    // Start processing the queue in background
+    processIngestionQueue(dbWorkerUrl, privateKeyPem, cloudflareAccountId, cloudflareApiToken, openai)
+      .catch(error => {
+        console.error('Background ingestion processing error:', error);
+      });
+
+    return res.json({
+      message: 'Ingestion started',
+      queued,
+      failed,
+      total: articleIds.length,
+      queuedCount: queued.length,
+      failedCount: failed.length
+    });
+  } catch (error) {
+    console.error('Ingestion endpoint error:', error);
+    return res.status(500).json({
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * POST /ingest-updates
+ * Authenticated endpoint to process new and revised articles from RSS feed
+ * Requires valid JWT token from worker
+ * No parameters required - fetches latest updates from SEP RSS feed
+ * 
+ * Only processes articles that are:
+ * - New (not in database), OR
+ * - Revised (RSS pubDate is more recent than database updated date)
+ */
+app.post('/ingest-updates', verifyWorkerAuth, async (req, res) => {
+  try {
+    // Fetch RSS feed items with article IDs and publication dates
+    const rssItems = await fetchRssArticles();
+
+    // Track results
+    const queued: string[] = [];
+    const skipped: string[] = [];
+    const failed: { articleId: string; error: string; }[] = [];
+
+    // Check each article and determine if it needs processing
+    for (const item of rssItems) {
+      try {
+        const articleId = item.articleId;
+        const rssPubDate = item.pubDate;
+
+        // Get the article's updated date from the database (null if doesn't exist)
+        const dbUpdatedDate = await getArticleUpdatedDate(articleId, dbWorkerUrl, privateKeyPem);
+
+        let shouldQueue = false;
+
+        if (dbUpdatedDate === null) {
+          // Article doesn't exist in database - queue it
+          shouldQueue = true;
+        } else {
+          // Article exists - compare dates
+          // Database stores dates in YYYY-MM-DD format (UTC)
+          // RSS pubDate is a Date object parsed from RFC 2822 format (Pacific Time)
+
+          // Convert database date string to Date object (treat as UTC midnight)
+          const dbDate = new Date(dbUpdatedDate + 'T00:00:00Z');
+
+          // Convert RSS pubDate to just the date (ignore time) for comparison
+          // Extract YYYY-MM-DD in UTC from the RSS date
+          const rssPubDateUTC = new Date(Date.UTC(
+            rssPubDate.getUTCFullYear(),
+            rssPubDate.getUTCMonth(),
+            rssPubDate.getUTCDate()
+          ));
+
+          // Queue if RSS publication date is newer than database date
+          if (rssPubDateUTC > dbDate) {
+            shouldQueue = true;
+          }
+        }
+
+        if (shouldQueue) {
+          await addToIngestionQueue(articleId, dbWorkerUrl, privateKeyPem);
+          queued.push(articleId);
+        } else {
+          skipped.push(articleId);
+        }
+      } catch (error) {
+        failed.push({
+          articleId: item.articleId,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        });
+      }
+    }
+
+    // Start processing the queue in background if there are items to process
+    if (queued.length > 0) {
+      processIngestionQueue(dbWorkerUrl, privateKeyPem, cloudflareAccountId, cloudflareApiToken, openai)
+        .catch(error => {
+          console.error('Background ingestion processing error:', error);
+        });
+    }
+
+    return res.json({
+      message: 'Update ingestion started',
+      queued,
+      skipped,
+      failed,
+      total: rssItems.length,
+      queuedCount: queued.length,
+      skippedCount: skipped.length,
+      failedCount: failed.length
+    });
+  } catch (error) {
+    console.error('Update ingestion endpoint error:', error);
+    return res.status(500).json({
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
 // ============================================================================
 // SERVER STARTUP
 // ============================================================================
@@ -116,6 +263,8 @@ app.get('/health', (req, res) => {
 app.listen(port, () => {
   console.log(`\n🚀 Server running on http://localhost:${port}`);
   console.log(`   POST /search - Hybrid search endpoint`);
+  console.log(`   POST /ingest - Authenticated full ingestion endpoint`);
+  console.log(`   POST /ingest-updates - Authenticated RSS updates endpoint`);
   console.log(`   GET  /health - Health check\n`);
 });
 

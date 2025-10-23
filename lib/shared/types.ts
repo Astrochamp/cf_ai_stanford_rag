@@ -4,6 +4,11 @@
 
 export type ArticleID = string & { __id: true; };
 
+export type RssFeedItem = {
+  articleId: ArticleID;
+  pubDate: Date; // Publication date from RSS feed
+};
+
 export type ArticleSection = {
   number: string; // 3.3
   heading: string; // Relevance and connexive logics

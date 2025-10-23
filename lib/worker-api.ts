@@ -226,3 +226,31 @@ export async function getGenerationText(chunkId: string, dbWorkerUrl: string, pr
 
   return response.text();
 }
+
+/**
+ * Get the updated date of an article from the database.
+ * Returns null if the article doesn't exist in the database.
+ * 
+ * @param articleId - The article ID to check
+ * @param dbWorkerUrl - The database worker URL
+ * @param privateKeyPem - The private key for authentication
+ * @returns The updated date string (YYYY-MM-DD format) or null if article doesn't exist
+ */
+export async function getArticleUpdatedDate(
+  articleId: string,
+  dbWorkerUrl: string,
+  privateKeyPem: string
+): Promise<string | null> {
+  const result = await executeD1Query(
+    'SELECT updated FROM articles WHERE article_id = ?',
+    dbWorkerUrl,
+    privateKeyPem,
+    [articleId]
+  );
+
+  if (!result.results || result.results.length === 0) {
+    return null;
+  }
+
+  return result.results[0].updated as string;
+}

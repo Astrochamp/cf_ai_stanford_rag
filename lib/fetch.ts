@@ -3,8 +3,9 @@ import { extractFigureIds, processFiguresInContent } from './preprocess';
 import {
   articlesListURL,
   baseArticleURL,
+  sepRssFeedURL,
 } from './shared/constants';
-import type { Article, ArticleID, ArticleSection } from './shared/types';
+import type { Article, ArticleID, ArticleSection, RssFeedItem } from './shared/types';
 import { normaliseText } from './shared/utils';
 
 
@@ -27,6 +28,77 @@ export async function fetchArticlesList(): Promise<ArticleID[]> {
   });
   const uniqueArticleIDs = Array.from(new Set(articleIDs));
   return uniqueArticleIDs;
+}
+
+/**
+ * Fetch the SEP RSS feed which contains new and recently revised articles.
+ * @returns The RSS feed XML as a string
+ */
+export async function fetchRssFeed(): Promise<string> {
+  const response = await fetch(sepRssFeedURL);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch RSS feed: ${response.status} ${response.statusText}`);
+  }
+  return await response.text();
+}
+
+/**
+ * Parse the SEP RSS feed XML and extract article IDs with publication dates.
+ * The RSS feed contains items with links like "https://plato.stanford.edu/entries/article-id/"
+ * and pubDate in RFC 2822 format (e.g., "Thu, 23 Oct 2025 03:22:01 -0800")
+ * 
+ * Note: The SEP RSS feed uses Pacific Time (PST/PDT, -0800/-0700) in pubDate despite
+ * stating "All dates are given in UTC" in their documentation.
+ * 
+ * @param rssFeedXml - The RSS feed XML string
+ * @returns Array of RSS feed items with article IDs and publication dates
+ */
+export function parseRssFeed(rssFeedXml: string): RssFeedItem[] {
+  const $ = cheerio.load(rssFeedXml, { xmlMode: true });
+  const items: RssFeedItem[] = [];
+
+  // Parse each <item> in the feed
+  $('item').each((_, item) => {
+    const $item = $(item);
+    const link = $item.find('link').text().trim();
+    const pubDateStr = $item.find('pubDate').text().trim();
+
+    if (!link || !link.includes('/entries/')) return;
+
+    // Extract article ID from URL like "https://plato.stanford.edu/entries/article-id/"
+    const match = link.match(/\/entries\/([^\/]+)/);
+    if (!match || !match[1]) return;
+
+    const articleId = match[1] as ArticleID;
+
+    // Parse the pubDate (RFC 2822 format)
+    // Example: "Thu, 23 Oct 2025 03:22:01 -0800"
+    const pubDate = pubDateStr ? new Date(pubDateStr) : new Date();
+
+    items.push({ articleId, pubDate });
+  });
+
+  // Return unique article IDs (keep the most recent pubDate if duplicates)
+  const uniqueItems = new Map<string, RssFeedItem>();
+  for (const item of items) {
+    const existing = uniqueItems.get(item.articleId);
+    if (!existing || item.pubDate > existing.pubDate) {
+      uniqueItems.set(item.articleId, item);
+    }
+  }
+
+  return Array.from(uniqueItems.values());
+}
+
+/**
+ * Fetch and parse the SEP RSS feed to get articles with publication dates.
+ * This is a convenience function that combines fetchRssFeed and parseRssFeed.
+ * 
+ * @returns Array of RSS feed items with article IDs and publication dates
+ */
+export async function fetchRssArticles(): Promise<RssFeedItem[]> {
+  const rssFeedXml = await fetchRssFeed();
+  return parseRssFeed(rssFeedXml);
 }
 
 /**
