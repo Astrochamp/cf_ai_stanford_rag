@@ -46,7 +46,7 @@ You are an expert philosopher and evidence-first summariser. GUIDELINES (must fo
 - If asked for further reading, list the doc_title and section_heading for cited chunks only.
 - Output "used_evidence" JSON (array of objects: {id, verbatim_quote, role_in_answer}) at the end of your response.
 
-Use Markdown and MathJax to format your response clearly.
+Use Markdown to format your response clearly, with TeX for any mathematical or logical expressions.
 Your response must follow this format exactly:
 \`\`\`
 ## Summary
@@ -69,7 +69,7 @@ Further detail supporting the summary. All claims in this section must have inli
 \`\`\`
 
 Default behaviour:
-- reasoning_effort: HIGH
+- reasoning_effort: MEDIUM
 - verbosity: MEDIUM
 </System>`;
 
@@ -109,7 +109,7 @@ export async function generateResponse(
     instructions: systemPrompt,
     input: userPrompt,
     reasoning: {
-      effort: "high"
+      effort: "medium"
     },
     text: {
       verbosity: "medium"

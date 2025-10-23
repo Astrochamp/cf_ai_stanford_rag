@@ -1,6 +1,7 @@
 <script lang="ts">
   import { queryOracle } from "$lib/api";
   import type { Message } from "$lib/types";
+  import { marked } from "marked";
   import { onMount } from "svelte";
 
   let query = $state("");
@@ -8,6 +9,13 @@
   let isLoading = $state(false);
   let isDark = $state(false);
   let inputElement: HTMLTextAreaElement;
+  let showUnusedSources = $state<Record<string, boolean>>({});
+
+  // Configure marked for better output
+  marked.setOptions({
+    breaks: true,
+    gfm: true,
+  });
 
   const exampleQuestions = [
     "What is epistemology?",
@@ -54,6 +62,7 @@
         role: "assistant",
         content: response.answer,
         sources: response.sources,
+        usedEvidence: response.usedEvidence,
         timestamp: response.timestamp,
       };
 
@@ -89,6 +98,29 @@
   function clearConversation() {
     messages = [];
     query = "";
+  }
+
+  function toggleUnusedSources(messageId: string) {
+    showUnusedSources[messageId] = !showUnusedSources[messageId];
+  }
+
+  // Helper function to categorize sources into used and unused
+  function categorizeSources(message: Message) {
+    const allSources = message.sources || [];
+    const usedEvidence = message.usedEvidence || [];
+    const usedSourceIds = new Set(usedEvidence.map((e) => e.id));
+
+    const usedSources = allSources.filter((s) => usedSourceIds.has(s.id));
+    const unusedSources = allSources.filter((s) => !usedSourceIds.has(s.id));
+
+    // Create a map for quick lookup of used evidence details
+    const evidenceMap = new Map(usedEvidence.map((e) => [e.id, e]));
+
+    return {
+      usedSources,
+      unusedSources,
+      evidenceMap,
+    };
   }
 </script>
 
@@ -225,13 +257,6 @@
           >. This unofficial tool uses retrieval-augmented generation to provide
           scholarly insights.
         </p>
-        <div
-          class="inline-block px-4 py-2 rounded-lg text-sm {isDark
-            ? 'bg-amber-900/20 border border-amber-800 text-amber-300'
-            : 'bg-amber-50 border border-amber-200 text-amber-900'}"
-        >
-          ⚠️ <span class="font-medium">Demo Mode:</span> Using placeholder API responses
-        </div>
       </div>
 
       <!-- Example Questions -->
@@ -335,58 +360,194 @@
                         ? 'prose-invert prose-stone'
                         : 'prose-stone'}"
                   >
-                    <p class="whitespace-pre-wrap leading-relaxed">
-                      {message.content}
-                    </p>
+                    {#if message.role === "user"}
+                      <p class="whitespace-pre-wrap leading-relaxed">
+                        {message.content}
+                      </p>
+                    {:else}
+                      {@html marked(message.content)}
+                    {/if}
                   </div>
                 </div>
 
                 <!-- Sources -->
                 {#if message.sources && message.sources.length > 0}
+                  {@const { usedSources, unusedSources, evidenceMap } =
+                    categorizeSources(message)}
                   <div class="mt-4 space-y-2">
-                    <p
-                      class="text-xs font-semibold uppercase tracking-wider {isDark
-                        ? 'text-stone-400'
-                        : 'text-stone-600'}"
-                    >
-                      Sources
-                    </p>
-                    {#each message.sources as source}
-                      <a
-                        href={source.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="block p-3 rounded-lg border transition-all group {isDark
-                          ? 'border-stone-700 hover:border-amber-600 hover:bg-amber-950/30'
-                          : 'border-stone-200 hover:border-amber-300 hover:bg-amber-50/50'}"
+                    <!-- Used Sources Section -->
+                    {#if usedSources.length > 0}
+                      <p
+                        class="text-xs font-semibold uppercase tracking-wider {isDark
+                          ? 'text-stone-400'
+                          : 'text-stone-600'}"
                       >
-                        <div class="flex items-start justify-between gap-3">
-                          <div class="flex-1 min-w-0">
-                            <h4
-                              class="font-semibold text-sm mb-1 {isDark
-                                ? 'text-stone-200 group-hover:text-amber-400'
-                                : 'text-stone-900 group-hover:text-amber-900'}"
-                            >
-                              {source.title}
-                            </h4>
-                            <p
-                              class="text-xs line-clamp-2 {isDark
-                                ? 'text-stone-400'
-                                : 'text-stone-600'}"
-                            >
-                              {source.excerpt}
-                            </p>
-                          </div>
+                        Evidence Used ({usedSources.length})
+                      </p>
+                      {#each usedSources as source}
+                        {@const evidence = evidenceMap.get(source.id)}
+                        <div
+                          class="block p-3 rounded-lg border transition-all {isDark
+                            ? 'border-amber-700 bg-amber-950/30'
+                            : 'border-amber-200 bg-amber-50/50'}"
+                        >
                           <div
-                            class="shrink-0 text-xs {isDark
+                            class="flex items-start justify-between gap-3 mb-2"
+                          >
+                            <div class="flex-1 min-w-0">
+                              <h4
+                                class="font-semibold text-sm {isDark
+                                  ? 'text-stone-200'
+                                  : 'text-stone-900'}"
+                              >
+                                {source.doc_title}
+                              </h4>
+                              {#if source.section_heading}
+                                <p
+                                  class="text-xs mt-1 {isDark
+                                    ? 'text-stone-400'
+                                    : 'text-stone-600'}"
+                                >
+                                  § {source.section_heading}
+                                </p>
+                              {/if}
+                            </div>
+                            <div
+                              class="shrink-0 text-xs font-mono px-2 py-1 rounded {isDark
+                                ? 'bg-amber-900 text-amber-400'
+                                : 'bg-amber-200 text-amber-800'}"
+                            >
+                              chunk {source.chunk_index}
+                            </div>
+                          </div>
+                          {#if evidence}
+                            <div class="mb-2">
+                              <p
+                                class="text-xs font-semibold mb-1 {isDark
+                                  ? 'text-amber-400'
+                                  : 'text-amber-700'}"
+                              >
+                                Quote:
+                              </p>
+                              <p
+                                class="text-xs italic {isDark
+                                  ? 'text-stone-300'
+                                  : 'text-stone-700'}"
+                              >
+                                "{evidence.verbatim_quote}"
+                              </p>
+                            </div>
+                            <!-- <div class="mb-2">
+                              <p
+                                class="text-xs font-semibold mb-1 {isDark
+                                  ? 'text-amber-400'
+                                  : 'text-amber-700'}"
+                              >
+                                Role:
+                              </p>
+                              <p
+                                class="text-xs {isDark
+                                  ? 'text-stone-300'
+                                  : 'text-stone-700'}"
+                              >
+                                {evidence.role_in_answer}
+                              </p>
+                            </div> -->
+                          {/if}
+                          <p
+                            class="text-xs mt-2 font-mono {isDark
                               ? 'text-stone-500'
                               : 'text-stone-500'}"
                           >
-                            {Math.round(source.relevanceScore * 100)}%
-                          </div>
+                            {source.id}
+                          </p>
                         </div>
-                      </a>
-                    {/each}
+                      {/each}
+                    {/if}
+
+                    <!-- Toggle for Unused Sources -->
+                    {#if unusedSources.length > 0}
+                      <button
+                        onclick={() => toggleUnusedSources(message.id)}
+                        class="w-full text-left text-xs font-semibold uppercase tracking-wider flex items-center gap-2 transition-colors py-2 {isDark
+                          ? 'text-stone-400 hover:text-stone-300'
+                          : 'text-stone-600 hover:text-stone-700'}"
+                      >
+                        Show unused sources ({unusedSources.length})
+                        <svg
+                          class="w-4 h-4 transition-transform {showUnusedSources[
+                            message.id
+                          ]
+                            ? 'rotate-180'
+                            : ''}"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M19 9l-7 7-7-7"
+                          />
+                        </svg>
+                      </button>
+
+                      <!-- Unused Sources (Collapsed by Default) -->
+                      {#if showUnusedSources[message.id]}
+                        {#each unusedSources as source}
+                          <div
+                            class="block p-3 rounded-lg border transition-all {isDark
+                              ? 'border-stone-700 bg-stone-800/50'
+                              : 'border-stone-200 bg-stone-50/50'}"
+                          >
+                            <div
+                              class="flex items-start justify-between gap-3 mb-2"
+                            >
+                              <div class="flex-1 min-w-0">
+                                <h4
+                                  class="font-semibold text-sm {isDark
+                                    ? 'text-stone-200'
+                                    : 'text-stone-900'}"
+                                >
+                                  {source.doc_title}
+                                </h4>
+                                {#if source.section_heading}
+                                  <p
+                                    class="text-xs mt-1 {isDark
+                                      ? 'text-stone-400'
+                                      : 'text-stone-600'}"
+                                  >
+                                    § {source.section_heading}
+                                  </p>
+                                {/if}
+                              </div>
+                              <div
+                                class="shrink-0 text-xs font-mono px-2 py-1 rounded {isDark
+                                  ? 'bg-stone-700 text-stone-400'
+                                  : 'bg-stone-200 text-stone-600'}"
+                              >
+                                chunk {source.chunk_index}
+                              </div>
+                            </div>
+                            <p
+                              class="text-xs line-clamp-3 {isDark
+                                ? 'text-stone-400'
+                                : 'text-stone-600'}"
+                            >
+                              {source.text}
+                            </p>
+                            <p
+                              class="text-xs mt-2 font-mono {isDark
+                                ? 'text-stone-500'
+                                : 'text-stone-500'}"
+                            >
+                              {source.id}
+                            </p>
+                          </div>
+                        {/each}
+                      {/if}
+                    {/if}
                   </div>
                 {/if}
               </div>
@@ -575,5 +736,76 @@
 
   .animate-bounce {
     animation: bounce 1s infinite;
+  }
+
+  /* Enhanced prose styling for markdown content */
+  :global(.prose h2) {
+    font-weight: 700;
+    margin-top: 1.5em;
+    margin-bottom: 0.75em;
+    font-size: 1.5em;
+    line-height: 1.3;
+  }
+
+  :global(.prose h3) {
+    font-weight: 600;
+    margin-top: 1.25em;
+    margin-bottom: 0.5em;
+    font-size: 1.25em;
+  }
+
+  :global(.prose p) {
+    margin-top: 0.75em;
+    margin-bottom: 0.75em;
+    line-height: 1.7;
+  }
+
+  :global(.prose code) {
+    font-size: 0.875em;
+    padding: 0.125em 0.25em;
+    border-radius: 0.25em;
+    font-family: ui-monospace, monospace;
+  }
+
+  :global(.prose pre) {
+    margin-top: 1em;
+    margin-bottom: 1em;
+    padding: 1em;
+    border-radius: 0.5em;
+    overflow-x: auto;
+    font-size: 0.875em;
+    line-height: 1.5;
+  }
+
+  :global(.prose pre code) {
+    padding: 0;
+    background-color: transparent;
+  }
+
+  :global(.prose ul, .prose ol) {
+    margin-top: 0.75em;
+    margin-bottom: 0.75em;
+    padding-left: 1.5em;
+  }
+
+  :global(.prose li) {
+    margin-top: 0.25em;
+    margin-bottom: 0.25em;
+  }
+
+  :global(.prose strong) {
+    font-weight: 600;
+  }
+
+  :global(.prose a) {
+    text-decoration: underline;
+    font-weight: 500;
+  }
+
+  :global(.prose blockquote) {
+    border-left: 3px solid;
+    padding-left: 1em;
+    font-style: italic;
+    margin: 1em 0;
   }
 </style>

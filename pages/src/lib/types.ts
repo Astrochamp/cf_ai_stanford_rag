@@ -13,6 +13,7 @@ export interface QueryResponse {
   query: string;
   answer: string;
   sources: Source[];
+  usedEvidence: UsedEvidenceItem[];
   timestamp: Date;
 }
 
@@ -21,6 +22,7 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
   sources?: Source[];
+  usedEvidence?: UsedEvidenceItem[];
   timestamp: Date;
 }
 
