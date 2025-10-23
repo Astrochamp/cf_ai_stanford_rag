@@ -33,6 +33,14 @@
 	  }
 	],
 	/**
+	 * Cron Triggers
+	 * Schedule Worker to run at specific times
+	 * https://developers.cloudflare.com/workers/configuration/cron-triggers/
+	 */
+	"triggers": {
+		"crons": ["0 3 * * *"]
+	},
+	/**
 	 * Smart Placement
 	 * Docs: https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
 	 */

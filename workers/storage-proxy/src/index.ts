@@ -561,4 +561,35 @@ export default {
 
     return handleRequest(request, env);
   },
+
+  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    // Scheduled task: POST to /ingest-updates on Express server daily at 03:00 UTC
+    try {
+      console.log('Running scheduled ingest-updates task at', new Date(controller.scheduledTime).toISOString());
+      
+      const response = await callExpressEndpoint(env, '/ingest-updates', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          scheduledTime: controller.scheduledTime,
+          cron: controller.cron,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Failed to trigger ingest-updates:', response.status, errorText);
+        throw new Error(`Express server returned ${response.status}: ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log('Successfully triggered ingest-updates:', result);
+    } catch (error) {
+      console.error('Error in scheduled task:', error);
+      // Optionally re-throw to mark the scheduled event as failed
+      throw error;
+    }
+  },
 } satisfies ExportedHandler<Env>;
