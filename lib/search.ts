@@ -42,7 +42,7 @@ export async function semanticSearch(
   // Build query to fetch chunks
   const placeholders = chunkIds.map(() => '?').join(',');
   const result = await executeD1Query(
-    `SELECT c.chunk_id, c.section_id, c.chunk_text, c.r2_url, s.heading, s.number, a.title
+    `SELECT c.chunk_id, c.section_id, c.chunk_text, c.num_tokens, c.r2_url, s.heading, s.number, a.title
      FROM chunks c
      JOIN sections s ON c.section_id = s.section_id
      JOIN articles a ON s.article_id = a.article_id

@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS chunks (
   section_id TEXT NOT NULL,
   chunk_index INTEGER NOT NULL, -- scoped to section
   chunk_text TEXT NOT NULL,
+  num_tokens INTEGER NOT NULL DEFAULT 0,
   r2_url TEXT,
   FOREIGN KEY (section_id) REFERENCES sections(section_id) ON DELETE CASCADE,
   UNIQUE(section_id, chunk_index)

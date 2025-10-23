@@ -121,6 +121,7 @@ async function searchChunks(env: Env, searchQuery: string, limit: number = 10) {
       chunks.chunk_id,
       chunks.section_id,
       chunks.chunk_text,
+      chunks.num_tokens,
       chunks_fts.rank as bm25_score
     FROM chunks_fts
     JOIN chunks ON chunks.rowid = chunks_fts.rowid

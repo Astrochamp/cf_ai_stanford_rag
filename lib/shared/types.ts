@@ -60,6 +60,7 @@ export type DBChunk = {
   section_id: string;
   chunk_index: number; // scoped to section
   chunk_text: string;
+  num_tokens: number;
   r2_url: string | null;
 };
 

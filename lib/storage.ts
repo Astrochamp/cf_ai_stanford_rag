@@ -32,11 +32,11 @@ export async function storeSectionMetadata(section: DBSection, dbWorkerUrl: stri
  */
 export async function storeChunkMetadata(chunk: DBChunk, dbWorkerUrl: string, privateKeyPem: string): Promise<void> {
   await executeD1Query(
-    `INSERT OR REPLACE INTO chunks (chunk_id, section_id, chunk_index, chunk_text, r2_url)
-     VALUES (?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO chunks (chunk_id, section_id, chunk_index, chunk_text, num_tokens, r2_url)
+     VALUES (?, ?, ?, ?, ?, ?)`,
     dbWorkerUrl,
     privateKeyPem,
-    [chunk.chunk_id, chunk.section_id, chunk.chunk_index, chunk.chunk_text, chunk.r2_url]
+    [chunk.chunk_id, chunk.section_id, chunk.chunk_index, chunk.chunk_text, chunk.num_tokens, chunk.r2_url]
   );
 }
 
@@ -76,9 +76,9 @@ export async function storeChunksBatch(
 
   // Batch insert into D1
   const queries = updatedChunks.map(chunk => ({
-    query: `INSERT OR REPLACE INTO chunks (chunk_id, section_id, chunk_index, chunk_text, r2_url)
-            VALUES (?, ?, ?, ?, ?)`,
-    params: [chunk.chunk_id, chunk.section_id, chunk.chunk_index, chunk.chunk_text, chunk.r2_url],
+    query: `INSERT OR REPLACE INTO chunks (chunk_id, section_id, chunk_index, chunk_text, num_tokens, r2_url)
+            VALUES (?, ?, ?, ?, ?, ?)`,
+    params: [chunk.chunk_id, chunk.section_id, chunk.chunk_index, chunk.chunk_text, chunk.num_tokens, chunk.r2_url],
   }));
 
   await executeD1Batch(queries, dbWorkerUrl, privateKeyPem);

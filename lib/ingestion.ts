@@ -69,6 +69,7 @@ export async function processAndStoreArticle(
       section_id: preambleSectionId,
       chunk_index: index,
       chunk_text: chunk.retrievalText,
+      num_tokens: chunk.tokenCount,
       r2_url: null,
     }));
 
@@ -114,6 +115,7 @@ export async function processAndStoreArticle(
         section_id: sectionId,
         chunk_index: index,
         chunk_text: chunk.retrievalText,
+        num_tokens: chunk.tokenCount,
         r2_url: null,
       }));
 
