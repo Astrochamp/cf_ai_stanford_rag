@@ -322,11 +322,11 @@
       : null;
   }
 
-  function handleTurnstileCallback(event: CustomEvent) {
-    const { token, preClearanceObtained } = event.detail as {
-      token: string;
-      preClearanceObtained: boolean;
-    };
+  function handleTurnstileCallback(data: {
+    token: string;
+    preClearanceObtained: boolean;
+  }) {
+    const { token, preClearanceObtained } = data;
 
     if (token) {
       turnstileToken = token; // Store the token for later use

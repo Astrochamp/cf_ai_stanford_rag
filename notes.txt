@@ -35,3 +35,4 @@ to do future:
 - https://www.elastic.co/search-labs/blog/advanced-chunking-fetch-surrounding-chunks
 - https://www.pinecone.io/learn/advanced-rag-techniques
 - streamed responses
+- store short section refs to allow deep linking
