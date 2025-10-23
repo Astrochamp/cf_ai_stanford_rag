@@ -5,6 +5,8 @@ import { createVerifyWorkerAuth } from './lib/auth';
 import { hybridSearch } from './lib/hybrid-search';
 import { processIngestionQueue } from './lib/ingestion';
 import { addToIngestionQueue } from './lib/queue';
+import { generateResponse, createEvidenceJson, EvidenceItem } from './lib/generation';
+
 
 function requireEnvVar(name: string): string {
   const value = process.env[name];
@@ -39,25 +41,30 @@ app.use(express.json());
 
 /**
  * POST /search
- * Hybrid search endpoint combining vector search, BM25, RRF fusion, and reranking
+ * Hybrid search endpoint combining vector search, BM25, RRF fusion, reranking, and LLM generation
  * 
  * Body:
  * - query: string (required) - The search query
- * - topK: number (optional, default 10) - Number of final results
- * - vectorTopK: number (optional, default 50) - Vector search results
- * - bm25TopK: number (optional, default 50) - BM25 search results
- * - rrfTopK: number (optional, default 50) - Results after RRF fusion
+ * - topK: number (optional, default 12, [1,12]) - Number of final results
  */
 app.post('/search', async (req, res) => {
   try {
-    const { query, topK = 10, vectorTopK = 50, bm25TopK = 50, rrfTopK = 50 } = req.body;
+    let { query, topK = 12 } = req.body;
+
+    const vectorTopK = 50;
+    const bm25TopK = 50;
+    const rrfTopK = 50;
 
     if (!query || typeof query !== 'string' || query.trim().length === 0) {
       return res.status(400).json({ error: 'Query is required and must be a non-empty string' });
     }
 
-    console.log(`\nSearch query: "${query}"`);
-    console.log(`Parameters: topK=${topK}, vectorTopK=${vectorTopK}, bm25TopK=${bm25TopK}, rrfTopK=${rrfTopK}`);
+    if (topK < 1 || topK > 12 || !Number.isInteger(topK)) {
+      return res.status(400).json({ error: 'topK must be an integer between 1 and 12 (inclusive)' });
+    }
+
+    // console.log(`\nSearch query: "${query}"`);
+    // console.log(`Parameters: topK=${topK}, vectorTopK=${vectorTopK}, bm25TopK=${bm25TopK}, rrfTopK=${rrfTopK}`);
 
     const results = await hybridSearch(
       query,
@@ -71,12 +78,20 @@ app.post('/search', async (req, res) => {
       rrfTopK
     );
 
-    console.log(`Found ${results.length} results`);
+    // console.log(`Found ${results.length} results`);
+
+    // Convert search results to evidence items
+    const evidenceJson = createEvidenceJson(results);
+    const evidenceItems: EvidenceItem[] = JSON.parse(evidenceJson);
+
+    // Generate LLM response using the evidence
+    const responseText = await generateResponse(query, evidenceItems, openai);
 
     return res.json({
       query,
-      results,
-      count: results.length,
+      response: responseText,
+      sources: evidenceItems,
+      count: evidenceItems.length,
     });
   } catch (error) {
     console.error('Search error:', error);
@@ -91,83 +106,6 @@ app.post('/search', async (req, res) => {
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
-
-// ============================================================================
-// EXAMPLE USAGE (uncomment to run)
-// ============================================================================
-
-/*
-// Example 1: Process a single article
-async function example1() {
-  const articleId = 'logic-ancient';
-  
-  // Add to queue
-  await addToIngestionQueue(articleId);
-  
-  // Process
-  await processAndStoreArticle(articleId);
-}
-
-// Example 2: Batch processing
-async function example2() {
-  const articleIds = ['logic-ancient', 'logic-modal', 'logic-temporal'];
-  
-  // Add all to queue
-  for (const id of articleIds) {
-    await addToIngestionQueue(id);
-  }
-  
-  // Process queue
-  await processIngestionQueue();
-}
-
-// Example 3: BM25 full-text search and retrieve
-async function example3() {
-  const query = 'aristotle logic';
-  
-  // Search for relevant chunks using BM25
-  const results = await searchChunks(query, 5);
-  console.log('BM25 search results:', results);
-  
-  // Get generation format for first result
-  if (results.results && results.results.length > 0) {
-    const chunkId = results.results[0].chunk_id;
-    const generationText = await getGenerationText(chunkId);
-    console.log('Generation text:', generationText);
-  }
-}
-
-// Example 4: Semantic search using embeddings
-async function example4() {
-  const query = 'What is the relationship between truth and validity in logic?';
-  
-  // Perform semantic search
-  const results = await semanticSearch(query, 5);
-  console.log('Semantic search results:');
-  
-  for (const result of results) {
-    console.log(`
-    Article: ${result.title}
-    Section: ${result.number} - ${result.heading || '(untitled)'}
-    Score: ${result.score}
-    Preview: ${result.chunk_text.substring(0, 200)}...
-    `);
-  }
-}
-
-// Example 5: Monitor queue
-async function example5() {
-  const stats = await getQueueStats();
-  console.log('Queue statistics:', stats);
-}
-
-// Run examples
-// example1().catch(console.error);
-// example2().catch(console.error);
-// example3().catch(console.error);
-// example4().catch(console.error);
-// example5().catch(console.error);
-*/
 
 // ============================================================================
 // SERVER STARTUP

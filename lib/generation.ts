@@ -1,8 +1,9 @@
 
 
+import OpenAI from 'openai';
 import type { HybridSearchResult } from './hybrid-search';
 
-interface EvidenceItem {
+export interface EvidenceItem {
   id: string;
   doc_title: string;
   section_id: string;
@@ -22,7 +23,7 @@ export function createEvidenceJson(results: HybridSearchResult[]): string {
   // Map to EvidenceItem format
   const evidenceItems: EvidenceItem[] = sortedResults.map((result) => ({
     id: result.chunk_id,
-    doc_title: result.article_title,
+    doc_title: `${result.article_title.trim()} (Stanford Encyclopedia of Philosophy)`,
     section_id: result.section_id,
     section_heading: result.heading || '',
     chunk_index: parseInt(result.chunk_id.split('/').pop()?.replace('chunk-', '') || '0'),
@@ -68,7 +69,7 @@ Further detail supporting the summary. All claims in this section must have inli
 \`\`\`
 
 Default behaviour:
-- reasoning_effort: MEDIUM
+- reasoning_effort: HIGH
 - verbosity: MEDIUM
 </System>`;
 
@@ -92,4 +93,28 @@ Formatting rules (must follow):
 Please answer in British English.
 
 QUESTION: ${userQuery}`;
+}
+
+export async function generateResponse(
+  userQuery: string,
+  evidenceItems: EvidenceItem[],
+  openai: OpenAI
+): Promise<string> {
+  const userPrompt = buildUserPrompt(userQuery, evidenceItems);
+
+  const response = await openai.responses.create({
+    model: "gpt-5-mini",
+    store: false,
+    stream: false,
+    instructions: systemPrompt,
+    input: userPrompt,
+    reasoning: {
+      effort: "high"
+    },
+    text: {
+      verbosity: "medium"
+    }
+  });
+
+  return response.output_text;
 }
