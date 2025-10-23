@@ -32,14 +32,22 @@
       "remote": true
 	  }
 	],
+  "preview_urls": false,
+  "workers_dev": true,
+  "routes": [
+    {
+      "pattern": "sep-oracle-worker.ivanoconnor.com",
+      "custom_domain": true
+    }
+  ],
 	/**
 	 * Cron Triggers
 	 * Schedule Worker to run at specific times
 	 * https://developers.cloudflare.com/workers/configuration/cron-triggers/
 	 */
-	"triggers": {
-		"crons": ["0 3 * * *"]
-	},
+	// "triggers": {
+	// 	"crons": ["0 3 * * *"]
+	// },
 	/**
 	 * Smart Placement
 	 * Docs: https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
@@ -56,8 +64,8 @@
 	 * https://developers.cloudflare.com/workers/wrangler/configuration/#environment-variables
 	 */
 	"vars": {
-    "JWT_AUDIENCE": "",
-    "EXPRESS_SERVER_URL": ""
+    "JWT_AUDIENCE": "https://sep-oracle-worker.ivanoconnor.com",
+    "EXPRESS_SERVER_URL": "https://sep-oracle-backend.ivanoconnor.com"
   }
 	/**
 	 * Note: Use secrets to store sensitive data.
