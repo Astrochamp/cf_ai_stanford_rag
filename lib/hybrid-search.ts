@@ -1,5 +1,5 @@
 import { rerankChunks } from './cf';
-import { executeD1Query, generateEmbedding, queryVectorize, searchChunks } from './worker-api';
+import { executeD1Query, generateEmbedding, getGenerationText, queryVectorize, searchChunks } from './worker-api';
 
 /**
  * Reciprocal Rank Fusion (RRF) score calculation
@@ -144,6 +144,7 @@ export interface HybridSearchResult {
   article_title: string;
   rrf_score: number;
   rerank_score: number;
+  generation_text: string;
 }
 
 /**
@@ -177,7 +178,6 @@ export async function hybridSearch(
   rrfTopK: number = 50
 ): Promise<HybridSearchResult[]> {
   // Step 1: Vector search
-  console.log('Step 1: Querying Vectorize...');
   const queryEmbedding = await generateEmbedding(query, accountId, apiToken);
   const vectorResults = await queryVectorize(
     queryEmbedding,
@@ -187,12 +187,10 @@ export async function hybridSearch(
   );
 
   // Step 2: BM25 search
-  console.log('Step 2: Performing BM25 search...');
   const bm25Response = await searchChunks(query, dbWorkerUrl, privateKeyPem, bm25TopK);
   const bm25Results = bm25Response.results || [];
 
   // Step 3: Dedupe and merge with RRF
-  console.log('Step 3: Merging results with RRF...');
   const vectorMatches = vectorResults.matches || [];
   const mergedResults = mergeWithRRF(vectorMatches, bm25Results, rrfTopK);
 
@@ -201,7 +199,6 @@ export async function hybridSearch(
   }
 
   // Fetch full chunk data from D1
-  console.log(`Fetching ${mergedResults.length} chunks from D1...`);
   const chunkIds = mergedResults.map(r => r.chunk_id);
   const placeholders = chunkIds.map(() => '?').join(',');
 
@@ -238,7 +235,6 @@ export async function hybridSearch(
     .filter((item): item is NonNullable<typeof item> => item !== null);
 
   // Step 4: Rerank
-  console.log('Step 4: Reranking with BGE reranker...');
   const contexts = chunksWithScores.map(c => c.chunk_text);
   const rerankResults = await rerankChunks(
     query,
@@ -248,11 +244,19 @@ export async function hybridSearch(
     { top_k: topK }
   );
 
-  // Map rerank results back to chunks
-  const finalResults: HybridSearchResult[] = rerankResults.map(result => ({
-    ...chunksWithScores[result.id],
-    rerank_score: result.score,
-  }));
+  // Map rerank results back to chunks and fetch generation text
+  const finalResults: HybridSearchResult[] = await Promise.all(
+    rerankResults.map(async (result) => {
+      const chunk = chunksWithScores[result.id];
+      const generationText = await getGenerationText(chunk.chunk_id, dbWorkerUrl, privateKeyPem);
+
+      return {
+        ...chunk,
+        rerank_score: result.score,
+        generation_text: generationText,
+      };
+    })
+  );
 
   return finalResults;
 }

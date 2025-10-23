@@ -43,6 +43,7 @@ async function testSearch() {
       console.log(`RRF Score: ${result.rrf_score.toFixed(4)}`);
       console.log(`Rerank Score: ${result.rerank_score.toFixed(4)}`);
       console.log(`Preview: ${result.chunk_text.substring(0, 150)}...`);
+      console.log(`Generation Text: ${result.generation_text.substring(0, 150)}...`);
       console.log('');
     });
     
