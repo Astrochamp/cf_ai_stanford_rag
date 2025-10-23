@@ -51,7 +51,7 @@ app.use(express.json());
  * Hybrid search endpoint combining vector search, BM25, RRF fusion, reranking, and LLM generation
  * 
  * Body:
- * - query: string (required) - The search query
+ * - query: string (required) - The search query (max 4000 characters)
  * - topK: number (optional, default 12, [1,12]) - Number of final results
  */
 app.post('/search', async (req, res) => {
@@ -62,16 +62,13 @@ app.post('/search', async (req, res) => {
     const bm25TopK = 50;
     const rrfTopK = 50;
 
-    if (!query || typeof query !== 'string' || query.trim().length === 0) {
-      return res.status(400).json({ error: 'Query is required and must be a non-empty string' });
+    if (!query || typeof query !== 'string' || query.trim().length === 0 || query.length > 4000) {
+      return res.status(400).json({ error: 'Query is required and must be a non-empty string with a maximum length of 4000 characters' });
     }
 
     if (topK < 1 || topK > 12 || !Number.isInteger(topK)) {
       return res.status(400).json({ error: 'topK must be an integer between 1 and 12 (inclusive)' });
     }
-
-    // console.log(`\nSearch query: "${query}"`);
-    // console.log(`Parameters: topK=${topK}, vectorTopK=${vectorTopK}, bm25TopK=${bm25TopK}, rrfTopK=${rrfTopK}`);
 
     const results = await hybridSearch(
       query,
@@ -84,8 +81,6 @@ app.post('/search', async (req, res) => {
       bm25TopK,
       rrfTopK
     );
-
-    // console.log(`Found ${results.length} results`);
 
     // Convert search results to evidence items
     const evidenceJson = createEvidenceJson(results);

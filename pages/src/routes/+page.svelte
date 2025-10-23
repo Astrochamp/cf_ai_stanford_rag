@@ -12,6 +12,20 @@
   let inputElement: HTMLTextAreaElement;
   let showUnusedSources = $state<Record<string, boolean>>({});
 
+  const MAX_CHAR_LIMIT = 4000;
+  const WARNING_THRESHOLD = 3500;
+
+  const charCount = $derived(query.length);
+  const showCharCounter = $derived(charCount >= WARNING_THRESHOLD);
+  const isOverLimit = $derived(charCount > MAX_CHAR_LIMIT);
+  const charCountColor = $derived(
+    isOverLimit
+      ? "text-red-600 dark:text-red-400"
+      : charCount >= WARNING_THRESHOLD
+        ? "text-amber-600 dark:text-amber-400"
+        : "",
+  );
+
   // Configure marked for better output
   marked.setOptions({
     breaks: true,
@@ -61,8 +75,15 @@
     localStorage.setItem("theme", isDark ? "dark" : "light");
   }
 
+  function autoResizeTextarea() {
+    if (inputElement) {
+      inputElement.style.height = "auto";
+      inputElement.style.height = inputElement.scrollHeight + "px";
+    }
+  }
+
   async function handleSubmit() {
-    if (!query.trim() || isLoading) return;
+    if (!query.trim() || isLoading || isOverLimit) return;
 
     const userMessage: Message = {
       id: crypto.randomUUID(),
@@ -75,6 +96,9 @@
     const currentQuery = query;
     query = "";
     isLoading = true;
+
+    // Reset textarea height after clearing
+    setTimeout(() => autoResizeTextarea(), 0);
 
     try {
       const response = await queryOracle(currentQuery);
@@ -860,23 +884,31 @@
             e.preventDefault();
             handleSubmit();
           }}
-          class="flex gap-3"
+          class="flex gap-3 items-end"
         >
           <textarea
             bind:this={inputElement}
             bind:value={query}
+            oninput={autoResizeTextarea}
             onkeydown={handleKeydown}
             placeholder="Ask a philosophical question..."
             rows="1"
-            class="flex-1 resize-none rounded-lg px-4 py-3 border focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent font-light {isDark
-              ? 'bg-stone-900 border-stone-600 text-stone-100 placeholder:text-stone-500'
-              : 'bg-white border-stone-300 text-stone-900 placeholder:text-stone-400'}"
+            style="max-height: 400px; overflow-y: auto;"
+            class="flex-1 resize-none rounded-lg px-4 py-3 border focus:outline-none focus:ring-2 focus:border-transparent font-light {isOverLimit
+              ? isDark
+                ? 'border-red-500 focus:ring-red-500 bg-stone-900 text-stone-100 placeholder:text-stone-500'
+                : 'border-red-500 focus:ring-red-500 bg-white text-stone-900 placeholder:text-stone-400'
+              : isDark
+                ? 'border-stone-600 focus:ring-amber-500 bg-stone-900 text-stone-100 placeholder:text-stone-500'
+                : 'border-stone-300 focus:ring-amber-500 bg-white text-stone-900 placeholder:text-stone-400'}"
             disabled={isLoading}
           ></textarea>
           <button
             type="submit"
-            disabled={!query.trim() || isLoading}
-            class="px-6 py-3 bg-amber-600 hover:bg-amber-700 disabled:bg-stone-300 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-colors flex items-center gap-2"
+            disabled={!query.trim() || isLoading || isOverLimit}
+            class="px-6 py-3 h-[50px] shrink-0 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-colors flex items-center gap-2 {isOverLimit
+              ? 'bg-red-600 hover:bg-red-700 disabled:bg-red-300'
+              : 'bg-amber-600 hover:bg-amber-700 disabled:bg-stone-300'}"
           >
             {#if isLoading}
               <svg class="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
@@ -911,23 +943,29 @@
             {/if}
           </button>
         </form>
-        <p
-          class="text-xs mt-3 text-center {isDark
-            ? 'text-stone-500'
-            : 'text-stone-500'}"
-        >
-          Press <kbd
-            class="px-1.5 py-0.5 rounded border font-mono {isDark
-              ? 'bg-stone-900 border-stone-600'
-              : 'bg-stone-100 border-stone-300'}">Enter</kbd
-          >
-          to send,
-          <kbd
-            class="px-1.5 py-0.5 rounded border font-mono {isDark
-              ? 'bg-stone-900 border-stone-600'
-              : 'bg-stone-100 border-stone-300'}">Shift+Enter</kbd
-          > for new line
-        </p>
+        <div class="flex items-center justify-between mt-3 text-xs">
+          <p class="text-center {isDark ? 'text-stone-500' : 'text-stone-500'}">
+            Press <kbd
+              class="px-1.5 py-0.5 rounded border font-mono {isDark
+                ? 'bg-stone-900 border-stone-600'
+                : 'bg-stone-100 border-stone-300'}">Enter</kbd
+            >
+            to send,
+            <kbd
+              class="px-1.5 py-0.5 rounded border font-mono {isDark
+                ? 'bg-stone-900 border-stone-600'
+                : 'bg-stone-100 border-stone-300'}">Shift+Enter</kbd
+            > for new line
+          </p>
+          {#if showCharCounter}
+            <p class="font-mono font-semibold {charCountColor}">
+              {charCount}/{MAX_CHAR_LIMIT}
+              {#if isOverLimit}
+                <span class="ml-1">- Message too long</span>
+              {/if}
+            </p>
+          {/if}
+        </div>
       </div>
     </div>
   </main>
