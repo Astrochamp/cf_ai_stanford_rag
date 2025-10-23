@@ -16,7 +16,7 @@ export interface ChunkNeighbor {
   chunk_index: number;
   chunk_text: string;
   num_tokens: number;
-  r2_url: string | null;
+  r2_key: string | null;
   article_id: string;
   article_title: string;
   heading: string | null;
@@ -87,7 +87,7 @@ export async function getChunkNeighbors(
   // Fetch the neighboring chunks
   const placeholders = indicesToFetch.map(() => '?').join(',');
   const neighborsResult = await executeD1Query(
-    `SELECT c.chunk_id, c.section_id, c.chunk_index, c.chunk_text, c.num_tokens, c.r2_url,
+    `SELECT c.chunk_id, c.section_id, c.chunk_index, c.chunk_text, c.num_tokens, c.r2_key,
             s.heading, s.number as section_number,
             a.article_id, a.title as article_title
      FROM chunks c
@@ -138,7 +138,7 @@ export interface HybridSearchResult {
   article_id: string;
   chunk_text: string;
   num_tokens: number;
-  r2_url: string | null;
+  r2_key: string | null;
   heading: string | null;
   section_number: string;
   article_title: string;
@@ -206,7 +206,7 @@ export async function hybridSearch(
   const placeholders = chunkIds.map(() => '?').join(',');
 
   const chunksResult = await executeD1Query(
-    `SELECT c.chunk_id, c.section_id, c.chunk_text, c.num_tokens, c.r2_url, s.heading, s.number as section_number, 
+    `SELECT c.chunk_id, c.section_id, c.chunk_text, c.num_tokens, c.r2_key, s.heading, s.number as section_number, 
             a.article_id, a.title as article_title
      FROM chunks c
      JOIN sections s ON c.section_id = s.section_id

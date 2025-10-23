@@ -3,6 +3,8 @@ import express from 'express';
 import { OpenAI } from "openai";
 import { createVerifyWorkerAuth } from './lib/auth';
 import { hybridSearch } from './lib/hybrid-search';
+import { processIngestionQueue } from './lib/ingestion';
+import { addToIngestionQueue } from './lib/queue';
 
 function requireEnvVar(name: string): string {
   const value = process.env[name];
@@ -181,15 +183,13 @@ app.listen(port, () => {
 // INGESTION SCRIPT (uncomment to run)
 // ============================================================================
 
-/*
-async function processAllWithQueue() {
-  const articleIds = ['logic-temporal'];
-  for (const id of articleIds) {
-    await addToIngestionQueue(id, dbWorkerUrl, privateKeyPem);
-  }
+// async function processAllWithQueue() {
+//   const articleIds = ['logic-temporal'];
+//   for (const id of articleIds) {
+//     await addToIngestionQueue(id, dbWorkerUrl, privateKeyPem);
+//   }
 
-  await processIngestionQueue(dbWorkerUrl, privateKeyPem, cloudflareAccountId, cloudflareApiToken, openai);
-}
+//   await processIngestionQueue(dbWorkerUrl, privateKeyPem, cloudflareAccountId, cloudflareApiToken, openai);
+// }
 
-processAllWithQueue().catch(console.error);
-*/
+// processAllWithQueue().catch(console.error);

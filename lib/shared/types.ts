@@ -61,7 +61,7 @@ export type DBChunk = {
   chunk_index: number; // scoped to section
   chunk_text: string;
   num_tokens: number;
-  r2_url: string | null;
+  r2_key: string | null;
 };
 
 export type IngestionStatus = 'pending' | 'processing' | 'completed' | 'failed';

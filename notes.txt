@@ -74,7 +74,7 @@ Formatting rules (must follow):
 3) Then output a JSON object named "used_evidence" listing {id, verbatim_quote, role_in_answer}.
 4) End with "UNSUPPORTED CLAIMS:" — a bullet list of anything you asserted that wasn't supported by evidence.
 
-Format your response according to this schema:
+Respond with only JSON and nothing else, following this schema:
 ```
 {
   "answer": "string",

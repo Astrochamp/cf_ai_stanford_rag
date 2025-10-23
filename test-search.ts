@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { HybridSearchResult } from './lib/hybrid-search';
 
 async function testSearch() {
   const query = 'What is temporal logic?';
@@ -26,17 +27,19 @@ async function testSearch() {
     const data = await response.json() as {
       query: string;
       count: number;
-      results: any[];
+      results: HybridSearchResult[];
     };
     
     console.log(`✓ Success! Found ${data.count} results\n`);
     
-    data.results.forEach((result: any, index: number) => {
+    data.results.forEach((result: HybridSearchResult, index: number) => {
       console.log('═'.repeat(70));
       console.log(`Result ${index + 1}`);
       console.log('─'.repeat(70));
       console.log(`Article: ${result.article_title}`);
       console.log(`Section: ${result.section_number} - ${result.heading}`);
+      console.log(`Tokens: ${result.num_tokens}`);
+      console.log(`R2 key: ${result.r2_key}`);
       console.log(`RRF Score: ${result.rrf_score.toFixed(4)}`);
       console.log(`Rerank Score: ${result.rerank_score.toFixed(4)}`);
       console.log(`Preview: ${result.chunk_text.substring(0, 150)}...`);

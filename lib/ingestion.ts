@@ -70,7 +70,7 @@ export async function processAndStoreArticle(
       chunk_index: index,
       chunk_text: chunk.retrievalText,
       num_tokens: chunk.tokenCount,
-      r2_url: null,
+      r2_key: null,
     }));
 
     const preambleGenerationTexts = preambleChunks.map(c => c.generationText);
@@ -116,7 +116,7 @@ export async function processAndStoreArticle(
         chunk_index: index,
         chunk_text: chunk.retrievalText,
         num_tokens: chunk.tokenCount,
-        r2_url: null,
+        r2_key: null,
       }));
 
       const generationTexts = chunks.map(c => c.generationText);
