@@ -269,8 +269,9 @@ async function handleR2Head(env: Env, key: string): Promise<Response> {
  */
 
 async function handleD1Query(env: Env, request: Request): Promise<Response> {
+  let body: { query: string; params?: any[]; } | undefined;
   try {
-    const body = await request.json() as { query: string; params?: any[]; };
+    body = await request.json() as { query: string; params?: any[]; };
 
     if (!body.query) {
       return new Response(JSON.stringify({ error: 'Query is required' }), {
@@ -292,9 +293,17 @@ async function handleD1Query(env: Env, request: Request): Promise<Response> {
       headers: { 'Content-Type': 'application/json' },
     });
   } catch (error: any) {
+    console.error('D1 Query Error:', {
+      message: error.message,
+      stack: error.stack,
+      query: body?.query?.substring(0, 200), // Log first 200 chars
+      paramCount: body?.params?.length
+    });
+
     return new Response(JSON.stringify({
       error: 'Query execution failed',
-      message: error.message
+      message: error.message,
+      details: error.cause ? String(error.cause) : undefined
     }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
@@ -567,7 +576,7 @@ export default {
     // Scheduled task: POST to /ingest-updates on Express server daily at 03:00 UTC
     try {
       console.log('Running scheduled ingest-updates task at', new Date(controller.scheduledTime).toISOString());
-      
+
       const response = await callExpressEndpoint(env, '/ingest-updates', {
         method: 'POST',
         headers: {
