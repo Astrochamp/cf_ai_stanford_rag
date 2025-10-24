@@ -130,7 +130,7 @@
         id: crypto.randomUUID(),
         role: "assistant",
         content:
-          "I apologize, but I encountered an error processing your query. Please try again.",
+          "Sorry, I encountered an error while processing your query. Please try again.",
         timestamp: new Date(),
         query: currentQuery,
       };
@@ -431,7 +431,7 @@
     <!-- Search Input Area (Always at top) -->
     <div class="mb-8">
       <div
-        class="rounded-2xl shadow-lg border p-5 {isDark
+        class="rounded-2xl shadow-lg border p-3 sm:p-5 {isDark
           ? 'bg-stone-800 border-stone-700'
           : 'bg-white border-stone-200'}"
       >
@@ -449,8 +449,9 @@
             onkeydown={handleKeydown}
             placeholder="Ask a philosophical question..."
             rows="1"
+            name="query"
             style="max-height: 400px; overflow-y: auto;"
-            class="flex-1 resize-none rounded-lg px-4 py-3 border focus:outline-none focus:ring-2 focus:border-transparent font-light {isOverLimit
+            class="placeholder:sm:text-md placeholder:text-sm flex-1 resize-none rounded-lg px-4 py-3 border focus:outline-none focus:ring-2 focus:border-transparent font-light {isOverLimit
               ? isDark
                 ? 'border-red-500 focus:ring-red-500 bg-stone-900 text-stone-100 placeholder:text-stone-500'
                 : 'border-red-500 focus:ring-red-500 bg-white text-stone-900 placeholder:text-stone-400'
@@ -462,7 +463,7 @@
           <button
             type="submit"
             disabled={!query.trim() || isLoading || isOverLimit}
-            class="px-6 py-3 h-[50px] shrink-0 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-colors flex items-center gap-2 {isOverLimit
+            class="px-3 py-1.5 sm:px-6 sm:py-3 h-[50px] shrink-0 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-colors flex items-center gap-2 {isOverLimit
               ? isDark
                 ? 'bg-red-700 hover:bg-red-800 disabled:bg-red-900'
                 : 'bg-red-600 hover:bg-red-700 disabled:bg-red-300'
@@ -503,8 +504,12 @@
             {/if}
           </button>
         </form>
-        <div class="flex items-center justify-between mt-3 text-xs">
-          <p class="text-center {isDark ? 'text-stone-500' : 'text-stone-500'}">
+        <div class="flex items-center justify-between text-xs">
+          <p
+            class="hidden sm:block mt-3 text-center {isDark
+              ? 'text-stone-500'
+              : 'text-stone-500'}"
+          >
             Press <kbd
               class="px-1.5 py-0.5 rounded border font-mono {isDark
                 ? 'bg-stone-900 border-stone-600'
@@ -518,7 +523,7 @@
             > for new line
           </p>
           {#if showCharCounter}
-            <p class="font-mono font-semibold {charCountColor}">
+            <p class=" ml-auto mt-3 font-mono font-semibold {charCountColor}">
               {charCount}/{MAX_CHAR_LIMIT}
               {#if isOverLimit}
                 <span class="ml-1">- Query too long</span>
