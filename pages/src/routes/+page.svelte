@@ -31,14 +31,7 @@
         : "",
   );
 
-  const citationRegex =
-    /\((UNSUPPORTED BY PROVIDED SOURCES|[A-Za-z0-9_-]+\/\d+(\.\d+)*\/chunk-\d+(\s*;\s*[A-Za-z0-9_-]+\/\d+(\.\d+)*\/chunk-\d+)*)\)/g;
-  const validSourceIdPattern = /^[A-Za-z0-9_-]+\/\d+(\.\d+)*\/chunk-\d+$/;
-
-  // Helper function to remove citations from quotes
-  function removeCitationsFromQuote(text: string): string {
-    return text.replace(citationRegex, "").trim();
-  }
+  const citationRegex = /\^(?:\[\d+\])+/g;
 
   // Configure marked for better output
   marked.setOptions({
@@ -123,7 +116,6 @@
         role: "assistant",
         content: response.answer,
         sources: response.sources,
-        usedEvidence: response.usedEvidence,
         timestamp: response.timestamp,
         query: currentQuery, // Store the query that generated this result
       };
@@ -173,69 +165,37 @@
   // Helper function to categorize sources into used and unused
   function categorizeSources(message: Message) {
     const allSources = message.sources || [];
-    const usedEvidence = message.usedEvidence || [];
-    const usedSourceIds = new Set(usedEvidence.map((e) => e.id));
+    const textStr = message.content;
+    const usedSourcesSet = new Set<number>();
 
-    const usedSources = allSources.filter((s) => usedSourceIds.has(s.id));
-    const unusedSources = allSources.filter((s) => !usedSourceIds.has(s.id));
+    textStr.replace(citationRegex, (match) => {
+      // Remove surrounding `^[` and `]`
+      const content = match.slice(2, -1);
 
-    // Create a map for quick lookup of used evidence details
-    const evidenceMap = new Map(usedEvidence.map((e) => [e.id, e]));
+      const intIds = content
+        .split("]")
+        .map((id) => parseInt(id.replace("[", "").trim()));
 
-    // Extract citation numbers from the message content to order sources
-    const citationOrder = extractCitationOrder(message.content);
-
-    // Sort used sources by their citation number
-    const sortedUsedSources = usedSources.sort((a, b) => {
-      const citationA = citationOrder.get(a.id) ?? Infinity;
-      const citationB = citationOrder.get(b.id) ?? Infinity;
-      return citationA - citationB;
+      intIds.forEach((intId) => usedSourcesSet.add(intId));
+      return match;
     });
 
+    const usedSources = allSources.filter((source) =>
+      usedSourcesSet.has(source.id),
+    );
+
+    const unusedSources = allSources.filter(
+      (source) => !usedSourcesSet.has(source.id),
+    );
+
+    // debug
+    console.log(usedSources);
+    console.log(unusedSources);
+
     return {
-      usedSources: sortedUsedSources,
+      usedSources,
       unusedSources,
-      evidenceMap,
-      citationOrder,
     };
-  }
-
-  // Helper function to extract citation ordering from text
-  function extractCitationOrder(text: string): Map<string, number> {
-    const sourceIdToCitationNumber = new Map<string, number>();
-    let nextCitationNumber = 1;
-
-    // Match citations in the same format as parseCitations
-    let match;
-    while ((match = citationRegex.exec(text)) !== null) {
-      const content = match[1];
-
-      // Skip unsupported claims
-      if (content.trim() === "UNSUPPORTED BY PROVIDED SOURCES") {
-        continue;
-      }
-
-      // Split by semicolon for multiple citations
-      const sourceIds = content.split(";").map((id: string) => id.trim());
-
-      // Validate source IDs
-      const allValid = sourceIds.every((id: string) =>
-        validSourceIdPattern.test(id),
-      );
-
-      if (!allValid) {
-        continue;
-      }
-
-      // Assign citation numbers in order of appearance
-      for (const sourceId of sourceIds) {
-        if (!sourceIdToCitationNumber.has(sourceId)) {
-          sourceIdToCitationNumber.set(sourceId, nextCitationNumber++);
-        }
-      }
-    }
-
-    return sourceIdToCitationNumber;
   }
 
   // Helper function to parse and convert citations to clickable links
@@ -246,43 +206,19 @@
 
     // Create a map to track unique citation numbers for each source ID
     const sourceIdToCitationNumber = new Map<string, number>();
-    let nextCitationNumber = 1;
 
-    // More specific regex that matches:
-    // 1. (UNSUPPORTED BY PROVIDED SOURCES) - exact match
-    // 2. Source IDs in format: (word/1.2/chunk-N) or (word/2.3.4/chunk-N; word/5/chunk-N)
-    //    Source IDs contain alphanumeric, hyphens, underscores, forward slashes
-    //    Multiple sources are separated by semicolons
-    return textStr.replace(citationRegex, (match, content) => {
-      // Check if it's the unsupported claim marker
-      if (content.trim() === "UNSUPPORTED BY PROVIDED SOURCES") {
-        return `<span class="citation unsupported" title="This claim is not supported by the provided sources">[citation needed]</span>`;
-      }
+    return textStr.replace(citationRegex, (match) => {
+      // Remove surrounding `^[` and `]`
+      const content = match.slice(2, -1);
 
-      // Split by semicolon for multiple citations
-      const sourceIds = content.split(";").map((id: string) => id.trim());
-
-      // Validate that all source IDs match the expected format (e.g., "word/1.2.3/chunk-N")
-      const allValid = sourceIds.every((id: string) =>
-        validSourceIdPattern.test(id),
-      );
-
-      // If not all IDs are valid, don't treat this as a citation
-      if (!allValid) {
-        return match; // Return the original text unchanged
-      }
+      const intIds = content
+        .split("]")
+        .map((id) => parseInt(id.replace("[", "").trim()));
 
       // Create clickable citation links with unique numbers
-      const citationLinks = sourceIds
-        .map((sourceId: string) => {
-          // Get or assign a unique citation number for this source
-          if (!sourceIdToCitationNumber.has(sourceId)) {
-            sourceIdToCitationNumber.set(sourceId, nextCitationNumber++);
-          }
-          const citationNumber = sourceIdToCitationNumber.get(sourceId)!;
-
-          const safeId = sourceId.replace(/[^a-zA-Z0-9-]/g, "_");
-          return `<a href="#source-${safeId}" class="citation" data-source-id="${sourceId}" title="Jump to source: ${sourceId}">[${citationNumber}]</a>`;
+      const citationLinks = intIds
+        .map((intId: number) => {
+          return `<a href="#source-${intId}" class="citation" data-source-id="${intId}" title="Jump to source: ${intId}">[${intId}]</a>`;
         })
         .join("");
 
@@ -315,16 +251,8 @@
     }
   }
 
-  // Helper function to extract article ID from source ID
-  function getArticleId(sourceId: string): string | null {
-    // Format: article-id/section/chunk-N
-    const parts = sourceId.split("/");
-    return parts.length > 0 ? parts[0] : null;
-  }
-
   // Helper function to get SEP URL for a source
-  function getSEPUrl(sourceId: string): string | null {
-    const articleId = getArticleId(sourceId);
+  function getSEPUrl(articleId: string): string | null {
     return articleId
       ? `https://plato.stanford.edu/entries/${articleId}/`
       : null;
@@ -681,15 +609,6 @@
     <!-- Results Section -->
     {#if results.length > 0}
       <div class="space-y-6">
-        <h2
-          class="text-lg font-semibold {isDark
-            ? 'text-stone-300'
-            : 'text-stone-700'}"
-        >
-          {results.length}
-          {results.length === 1 ? "Result" : "Results"}
-        </h2>
-
         {#each results as result (result.id)}
           <article
             class="rounded-xl border shadow-sm overflow-hidden {isDark
@@ -743,12 +662,8 @@
 
             <!-- Sources -->
             {#if result.sources && result.sources.length > 0}
-              {@const {
-                usedSources,
-                unusedSources,
-                evidenceMap,
-                citationOrder,
-              } = categorizeSources(result)}
+              {@const { usedSources, unusedSources } =
+                categorizeSources(result)}
               <div class="px-6 pb-5 space-y-3">
                 <!-- Used Sources Section -->
                 {#if usedSources.length > 0}
@@ -762,15 +677,10 @@
                     </p>
                     <div class="space-y-2">
                       {#each usedSources as source}
-                        {@const evidence = evidenceMap.get(source.id)}
-                        {@const safeId = source.id.replace(
-                          /[^a-zA-Z0-9-]/g,
-                          "_",
-                        )}
-                        {@const citationNum = citationOrder.get(source.id)}
-                        {@const sepUrl = getSEPUrl(source.id)}
+                        {@const citationNum = source.id}
+                        {@const sepUrl = getSEPUrl(source.article_id)}
                         <div
-                          id="source-{safeId}"
+                          id="source-{source.id}"
                           class="block p-3 rounded-lg border transition-all {isDark
                             ? 'border-amber-700 bg-amber-950/30'
                             : 'border-amber-200 bg-amber-50/50'}"
@@ -836,51 +746,13 @@
                               </a>
                             {/if}
                           </div>
-                          {#if evidence}
-                            <div class="mb-2">
-                              <p
-                                class="text-xs font-semibold mb-1 {isDark
-                                  ? 'text-amber-400'
-                                  : 'text-amber-700'}"
-                              >
-                                Quote:
-                              </p>
-                              <div
-                                class="text-xs italic {isDark
-                                  ? 'text-stone-300'
-                                  : 'text-stone-700'}"
-                              >
-                                "{@html parseTeX(
-                                  removeCitationsFromQuote(
-                                    evidence.verbatim_quote,
-                                  ),
-                                )}"
-                              </div>
-                            </div>
-                            <!-- <div class="mb-2">
-                              <p
-                                class="text-xs font-semibold mb-1 {isDark
-                                  ? 'text-amber-400'
-                                  : 'text-amber-700'}"
-                              >
-                                Role:
-                              </p>
-                              <p
-                                class="text-xs {isDark
-                                  ? 'text-stone-300'
-                                  : 'text-stone-700'}"
-                              >
-                                {evidence.role_in_answer}
-                              </p>
-                            </div> -->
-                          {/if}
-                          <p
-                            class="text-xs mt-2 font-mono {isDark
-                              ? 'text-stone-500'
-                              : 'text-stone-500'}"
+                          <div
+                            class="text-xs {isDark
+                              ? 'text-stone-400'
+                              : 'text-stone-600'} whitespace-pre-wrap"
                           >
-                            {source.id}
-                          </p>
+                            {@html parseTeX(source.text)}
+                          </div>
                         </div>
                       {/each}
                     </div>
@@ -920,13 +792,10 @@
                     {#if showUnusedSources[result.id]}
                       <div class="space-y-2 mt-2">
                         {#each unusedSources as source}
-                          {@const safeId = source.id.replace(
-                            /[^a-zA-Z0-9-]/g,
-                            "_",
-                          )}
-                          {@const sepUrl = getSEPUrl(source.id)}
+                          {@const citationNum = source.id}
+                          {@const sepUrl = getSEPUrl(source.article_id)}
                           <div
-                            id="source-{safeId}"
+                            id="source-{source.id}"
                             class="block p-3 rounded-lg border transition-all {isDark
                               ? 'border-stone-700 bg-stone-800/50'
                               : 'border-stone-200 bg-stone-50/50'}"
@@ -935,16 +804,27 @@
                               class="flex items-start justify-between gap-3 mb-2"
                             >
                               <div class="flex-1 min-w-0">
-                                <h4
-                                  class="font-semibold text-sm {isDark
-                                    ? 'text-stone-200'
-                                    : 'text-stone-900'}"
-                                >
-                                  {(source.doc_title ?? "").replace(
-                                    /\s+\(Stanford Encyclopedia of Philosophy\)$/,
-                                    "",
-                                  )}
-                                </h4>
+                                <div class="flex items-center gap-2">
+                                  {#if citationNum !== undefined}
+                                    <span
+                                      class="inline-flex items-center justify-center w-6 h-6 text-xs font-bold rounded {isDark
+                                        ? 'bg-amber-700 text-amber-100'
+                                        : 'bg-amber-600 text-white'}"
+                                    >
+                                      {citationNum}
+                                    </span>
+                                  {/if}
+                                  <h4
+                                    class="font-semibold text-sm {isDark
+                                      ? 'text-stone-200'
+                                      : 'text-stone-900'}"
+                                  >
+                                    {(source.doc_title ?? "").replace(
+                                      /\s+\(Stanford Encyclopedia of Philosophy\)$/,
+                                      "",
+                                    )}
+                                  </h4>
+                                </div>
                                 {#if source.section_heading}
                                   <p
                                     class="text-xs mt-1 {isDark
@@ -982,19 +862,12 @@
                               {/if}
                             </div>
                             <div
-                              class="text-xs line-clamp-3 {isDark
+                              class="text-xs {isDark
                                 ? 'text-stone-400'
-                                : 'text-stone-600'}"
+                                : 'text-stone-600'} whitespace-pre-wrap"
                             >
                               {@html parseTeX(source.text)}
                             </div>
-                            <p
-                              class="text-xs mt-2 font-mono {isDark
-                                ? 'text-stone-500'
-                                : 'text-stone-500'}"
-                            >
-                              {source.id}
-                            </p>
                           </div>
                         {/each}
                       </div>

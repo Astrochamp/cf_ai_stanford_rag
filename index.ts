@@ -7,7 +7,7 @@ import morgan from 'morgan';
 import { OpenAI } from "openai";
 import { createVerifyWorkerAuth } from './lib/auth';
 import { fetchArticlesList, fetchRssArticles } from './lib/fetch';
-import { createEvidenceJson, EvidenceItem, generateResponse } from './lib/generation';
+import { createEvidenceJson, generateResponse, LLMEvidenceItem } from './lib/generation';
 import { hybridSearch } from './lib/hybrid-search';
 import { processIngestionQueue } from './lib/ingestion';
 import { addToIngestionQueue } from './lib/queue';
@@ -132,17 +132,27 @@ app.post('/search', turnstile, async (req, res) => {
     );
 
     // Convert search results to evidence items
-    const evidenceJson = createEvidenceJson(results);
-    const evidenceItems: EvidenceItem[] = JSON.parse(evidenceJson);
+    const { evidenceJson, articleIdMap } = createEvidenceJson(results);
+    const llmEvidenceItems: LLMEvidenceItem[] = JSON.parse(evidenceJson);
+    const sources = llmEvidenceItems.map(item => {
+      return {
+        id: item.id,
+        article_id: articleIdMap.get(item.id) || '',
+        doc_title: item.doc_title,
+        section_heading: item.section_heading,
+        text: item.text,
+      };
+    });
+
 
     // Generate LLM response using the evidence
-    const responseText = await generateResponse(query, evidenceItems, openai);
+    const responseText = await generateResponse(query, llmEvidenceItems, openai);
 
     return res.json({
       query,
       response: responseText,
-      sources: evidenceItems,
-      count: evidenceItems.length,
+      sources: sources,
+      count: sources.length,
     });
   } catch (error) {
     console.error('Search error:', error);

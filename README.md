@@ -193,9 +193,8 @@ yarn reset-incomplete
 
 ### Citation Format
 ```
-Evidence-based claim (article-slug/section/chunk-id)
-Multiple citations (article-slug/section/chunk-1; article-slug/section/chunk-2; article-slug/section/chunk-3)
-Unsupported claims (UNSUPPORTED BY PROVIDED SOURCES)
+Single citation: `^[1]`
+Multiple citations: `^[1][2][3]
 ```
 
 ## 📋 License
