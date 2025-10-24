@@ -24,7 +24,7 @@ async function verifyAuthToken(request: Request, env: Env): Promise<jose.JWTVeri
     }
 
     const token = authHeader.substring(7); // remove 'Bearer ' prefix
-    const publicKey = await jose.importSPKI(env.JWT_PUBLIC_KEY, 'RS256');
+    const publicKey = await jose.importSPKI(env.JWT_PUBLIC_KEY.replace(/\\n/g, '\n'), 'RS256');
 
     const result = await jose.jwtVerify(token, publicKey, {
       audience: env.JWT_AUDIENCE,
@@ -68,7 +68,7 @@ async function generateExpressAuthToken(env: Env): Promise<string> {
   }
 
   // Import the private key for RS256 signing
-  const privateKey = await jose.importPKCS8(env.WORKER_PRIVATE_KEY, 'RS256');
+  const privateKey = await jose.importPKCS8(env.WORKER_PRIVATE_KEY.replace(/\\n/g, '\n'), 'RS256');
 
   // Create JWT with required claims
   const jwt = await new jose.SignJWT({})

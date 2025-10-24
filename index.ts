@@ -23,8 +23,8 @@ function requireEnvVar(name: string): string {
   return value;
 }
 
-const privateKeyPem = requireEnvVar('JWT_PRIVATE_KEY');
-const workerPublicKeyPem = requireEnvVar('WORKER_PUBLIC_KEY');
+const privateKeyPem = requireEnvVar('JWT_PRIVATE_KEY').replace(/\\n/g, '\n');
+const workerPublicKeyPem = requireEnvVar('WORKER_PUBLIC_KEY').replace(/\\n/g, '\n');
 const expressServerUrl = requireEnvVar('EXPRESS_SERVER_URL');
 const cloudflareAccountId = requireEnvVar('CLOUDFLARE_ACCOUNT_ID');
 const cloudflareApiToken = requireEnvVar('CLOUDFLARE_API_TOKEN');
