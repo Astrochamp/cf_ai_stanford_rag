@@ -475,7 +475,8 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
 
   // R2 endpoints
   if (path.startsWith('/r2/')) {
-    const key = path.substring(4); // Remove '/r2/' prefix
+    const encodedKey = path.substring(4); // Remove '/r2/' prefix
+    const key = decodeURIComponent(encodedKey); // Decode the key
 
     switch (method) {
       case 'GET':
