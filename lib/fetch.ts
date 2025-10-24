@@ -219,19 +219,36 @@ export async function fetchArticleContent(id: ArticleID): Promise<Article> {
   const preamble = $('#preamble').html() || '';
 
   const sections: ArticleSection[] = [];
+  let autoNumber = 1; // Counter for headings without explicit numbers
 
   $('#main-text h2, #main-text h3, #main-text h4, #main-text h5, #main-text h6').each((_, element) => {
-    // Only process proper section headings with an id attribute
-    // This filters out headings used for emphasis (e.g., <h4>Can self-defense justify abortion?</h4>)
-    // Proper headings look like: <h3 id="Pot">1.4 Potentiality</h3>
-    const id = $(element).attr('id');
-    if (!id) return;
+    // Check for id or name on the heading element itself
+    let identifier = $(element).attr('id') || $(element).attr('name');
+
+    // If not found, check for child elements (e.g., <h2><a name="Bab">Babbage</a></h2>)
+    if (!identifier) {
+      const $children = $(element).children();
+      for (let i = 0; i < $children.length; i++) {
+        const $child = $children.eq(i);
+        identifier = $child.attr('id') || $child.attr('name');
+        if (identifier) break;
+      }
+    }
+
+    // Skip headings without any identifier (used for emphasis)
+    if (!identifier) return;
 
     // content e.g. "2.2.2.4 Completeness as semi-decidability" -> heading = "Completeness as semi-decidability"
     const fullHeading = $(element).text().trim();
     const numberMatch = fullHeading.match(/^([\d.]+)\s+/);
-    const number = numberMatch ? numberMatch[1].trim().replace(/\.$/, "") : '';
-    const heading = number ? fullHeading.slice(number.length).replace(/^\./, "").trim() : fullHeading;
+    let number = numberMatch ? numberMatch[1].trim().replace(/\.$/, "") : '';
+
+    // If no number found, assign sequential number
+    if (!number) {
+      number = String(autoNumber++);
+    }
+
+    const heading = numberMatch ? fullHeading.slice(numberMatch[1].length).replace(/^\./, "").trim() : fullHeading;
 
     let content = '';
     let nextSibling = (element as any).nextSibling;

@@ -4,7 +4,8 @@
     "dev": "ts-node index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "ingest": "ts-node scripts/run-initial-ingestion.ts"
+    "ingest": "ts-node scripts/run-initial-ingestion.ts",
+    "reset-incomplete": "ts-node scripts/reset-incomplete-articles.ts"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
