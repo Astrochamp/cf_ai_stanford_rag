@@ -221,6 +221,12 @@ export async function fetchArticleContent(id: ArticleID): Promise<Article> {
   const sections: ArticleSection[] = [];
 
   $('#main-text h2, #main-text h3, #main-text h4, #main-text h5, #main-text h6').each((_, element) => {
+    // Only process proper section headings with an id attribute
+    // This filters out headings used for emphasis (e.g., <h4>Can self-defense justify abortion?</h4>)
+    // Proper headings look like: <h3 id="Pot">1.4 Potentiality</h3>
+    const id = $(element).attr('id');
+    if (!id) return;
+
     // content e.g. "2.2.2.4 Completeness as semi-decidability" -> heading = "Completeness as semi-decidability"
     const fullHeading = $(element).text().trim();
     const numberMatch = fullHeading.match(/^([\d.]+)\s+/);
