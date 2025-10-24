@@ -12,6 +12,7 @@
   let isDark = $state(false);
   let inputElement: HTMLTextAreaElement;
   let showUnusedSources = $state<Record<string, boolean>>({});
+  let isTouchDevice = $state(false);
 
   let turnstileToken: string | null = null; // Store Turnstile token
   let turnstileComponent: Turnstile; // Reference to the Turnstile component
@@ -61,6 +62,11 @@
     } else {
       isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
     }
+
+    // Detect touch device capability
+    isTouchDevice =
+      typeof window !== "undefined" &&
+      !!(window.ontouchstart !== undefined || navigator.maxTouchPoints > 0);
 
     // Handle citation link clicks
     const handleCitationClick = (e: MouseEvent) => {
@@ -142,7 +148,9 @@
   }
 
   function handleKeydown(e: KeyboardEvent) {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // On touch devices, only submit with button; Enter adds newlines
+    // On non-touch devices, Enter submits and Shift+Enter adds newlines
+    if (e.key === "Enter" && !e.shiftKey && !isTouchDevice) {
       e.preventDefault();
       handleSubmit();
     }
