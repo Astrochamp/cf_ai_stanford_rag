@@ -808,8 +808,8 @@
                                   {#if citationNum !== undefined}
                                     <span
                                       class="inline-flex items-center justify-center w-6 h-6 text-xs font-bold rounded {isDark
-                                        ? 'bg-amber-700 text-amber-100'
-                                        : 'bg-amber-600 text-white'}"
+                                        ? 'bg-stone-700 text-stone-200'
+                                        : 'bg-stone-300 text-stone-900'}"
                                     >
                                       {citationNum}
                                     </span>
