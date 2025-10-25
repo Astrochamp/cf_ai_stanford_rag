@@ -462,11 +462,10 @@ function replaceTexWithSymbols(text: string): string {
 
 /**
  * Call GPT API with a prompt and return the response text.
- * Handles API errors gracefully by returning fallback text.
  */
-async function callGPTAPI(prompt: string, openai: OpenAI, fallbackText: string, logMessage: string): Promise<string> {
+async function callGPTAPI(prompt: string, openai: OpenAI, logMessage: string): Promise<string> {
   if (!openai) {
-    return fallbackText;
+    throw new Error("OpenAI client is not provided.");
   }
 
   console.log(`  → ${logMessage}...`);
@@ -485,8 +484,7 @@ async function callGPTAPI(prompt: string, openai: OpenAI, fallbackText: string, 
 
     return response.output_text;
   } catch (error) {
-    console.error(`Error calling OpenAI API: ${error}`);
-    return fallbackText;
+    throw new Error(`Error calling OpenAI API: ${error}`);
   }
 }
 
@@ -497,17 +495,17 @@ async function callGPTAPI(prompt: string, openai: OpenAI, fallbackText: string, 
 async function batchGPTCalls<T>(
   items: T[],
   openai: OpenAI,
-  createPrompt: (item: T) => { prompt: string; fallback: string; },
+  createPrompt: (item: T) => { prompt: string; },
   logPrefix: string = "Processing"
 ): Promise<string[]> {
   if (!openai || items.length === 0) {
-    return items.map(item => createPrompt(item).fallback);
+    throw new Error("OpenAI client is not provided or items array is empty.");
   }
 
   console.log(`  → ${logPrefix} ${items.length} items in parallel...`);
 
   const promises = items.map(async (item, index) => {
-    const { prompt, fallback } = createPrompt(item);
+    const { prompt } = createPrompt(item);
     try {
       const response = await openai.responses.create({
         model: "gpt-5-nano",
@@ -521,8 +519,7 @@ async function batchGPTCalls<T>(
       });
       return response.output_text;
     } catch (error) {
-      console.error(`Error in batch call ${index + 1}/${items.length}: ${error}`);
-      return fallback;
+      throw new Error(`Error in batch call ${index + 1}/${items.length}: ${error}`);
     }
   });
 
@@ -567,7 +564,7 @@ ${text}
 
 **Converted Paragraph:**
 `;
-  return callGPTAPI(prompt, openai, text, 'Calling GPT to convert TeX to natural language');
+  return callGPTAPI(prompt, openai, 'Calling GPT to convert TeX to natural language');
 };
 
 /**
@@ -620,8 +617,7 @@ You will receive a paragraph from a philosophical text. Your job is to find all 
 ${text}
 
 **Converted Paragraph:**
-`,
-      fallback: text
+`
     }),
     'Converting TeX to natural language for'
   );
@@ -672,7 +668,7 @@ ${tableElem}
 
 **Summary:**
 `;
-  return callGPTAPI(prompt, openai, "", 'Calling GPT to generate table description');
+  return callGPTAPI(prompt, openai, 'Calling GPT to generate table description');
 };
 
 /**
@@ -730,8 +726,7 @@ A table presenting three modal logic systems, showing how they are built by addi
 ${tableElem}
 
 **Summary:**
-`,
-      fallback: ""
+`
     }),
     'Generating table descriptions for'
   );
@@ -942,7 +937,7 @@ export function extractFigureIds(html: string): Set<string> {
 
 /**
  * Extract the best available description for a figure.
- * Priority: extended description > short caption > alt text
+ * Priority: extended description > longest of (short captions or alt text)
  */
 function extractFigureDescription(
   $figure: cheerio.Cheerio<any>,
@@ -955,32 +950,36 @@ function extractFigureDescription(
     return extendedDescriptions.get(figId)!;
   }
 
-  // 2. Try short caption (figcaption tag or figlabel span or center p with text)
+  // 2. Collect all short captions and alt texts, then return the longest
+  const candidates: string[] = [];
+
   const figcaption = $figure.find('figcaption').text().trim();
   if (figcaption) {
-    return figcaption;
+    candidates.push(figcaption);
   }
 
   const figlabel = $figure.find('.figlabel').parent().text().trim();
   if (figlabel) {
     // Remove the link text about extended description
-    return figlabel.replace(/\[An?\s+extended description[^\]]*\]/gi, '').trim();
+    candidates.push(figlabel.replace(/\[An?\s+extended description[^\]]*\]/gi, '').trim());
   }
 
   const centerCaption = $figure.find('p.center, .center p').first().text().trim();
   if (centerCaption) {
-    return centerCaption.replace(/\[An?\s+extended description[^\]]*\]/gi, '').trim();
+    candidates.push(centerCaption.replace(/\[An?\s+extended description[^\]]*\]/gi, '').trim());
   }
 
-  // 3. Fallback to alt text from images
-  const altTexts: string[] = [];
+  // 3. Collect alt text from images
   $figure.find('img[alt]').each((_, img) => {
     const alt = $(img).attr('alt')?.trim();
-    if (alt) altTexts.push(alt);
+    if (alt) candidates.push(alt);
   });
 
-  if (altTexts.length > 0) {
-    return altTexts.join('; ');
+  // Return the longest candidate, or empty string if none found
+  if (candidates.length > 0) {
+    return candidates.reduce((longest, current) =>
+      current.length > longest.length ? current : longest
+    );
   }
 
   return '';
