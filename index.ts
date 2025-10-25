@@ -70,7 +70,7 @@ app.use(cors({
 app.use(morgan('combined'));
 
 // proxy config
-app.set('trust proxy', true); // Trust first proxy (for Heroku, etc.)
+app.set('trust proxy', 1); // Trust first proxy (for Heroku, etc.)
 
 // Rate limiting
 const limiter = rateLimit({
@@ -80,6 +80,12 @@ const limiter = rateLimit({
   legacyHeaders: true,
 });
 app.use('/search', limiter);
+
+// TEMP - to find "magic number" for trust proxy
+app.get('/ip', (request, response) => {
+	response.send(request.ip);
+});
+
 
 // ============================================================================
 // API ENDPOINTS
