@@ -70,7 +70,7 @@ app.use(cors({
 app.use(morgan('combined'));
 
 // proxy config
-app.set('trust proxy', 1); // Trust first proxy (for Heroku, etc.)
+app.set('trust proxy', 2); // Trust first proxy (for Heroku, etc.)
 
 // Rate limiting
 const limiter = rateLimit({
