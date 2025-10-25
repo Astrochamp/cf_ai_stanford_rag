@@ -182,6 +182,55 @@ export async function fetchExtendedFigureDescriptions(articleUrl: string, articl
   return descriptions;
 }
 
+/**
+ * Parse the table of contents to extract valid heading IDs.
+ * Excludes Bibliography, Academic Tools, Other Internet Resources, and Related Entries.
+ * 
+ * @param $ - Cheerio instance with loaded HTML
+ * @returns Set of valid heading IDs
+ */
+function parseTableOfContents($: cheerio.CheerioAPI): Set<string> {
+  const validIds = new Set<string>();
+  const excludedIds = new Set(['Bib', 'Aca', 'Oth', 'Rel']);
+
+  $('#toc a[href^="#"]').each((_, element) => {
+    const href = $(element).attr('href');
+    if (!href) return;
+
+    // Extract ID from href (e.g., "#Life" -> "Life")
+    const id = href.substring(1);
+    if (!id) return;
+
+    // Skip excluded sections
+    if (excludedIds.has(id)) return;
+
+    // Check if this is a child of an excluded section
+    const $parent = $(element).closest('li');
+    if ($parent.length > 0) {
+      // Check if any ancestor link has an excluded ID
+      const $ancestorLinks = $parent.parents('li').find('> a[href^="#"]');
+      let isUnderExcluded = false;
+
+      $ancestorLinks.each((_, ancestorLink) => {
+        const ancestorHref = $(ancestorLink).attr('href');
+        if (ancestorHref) {
+          const ancestorId = ancestorHref.substring(1);
+          if (excludedIds.has(ancestorId)) {
+            isUnderExcluded = true;
+            return false; // break
+          }
+        }
+      });
+
+      if (isUnderExcluded) return;
+    }
+
+    validIds.add(id);
+  });
+
+  return validIds;
+}
+
 // ============================================================================
 // ARTICLE FETCHING
 // ============================================================================
@@ -218,8 +267,19 @@ export async function fetchArticleContent(id: ArticleID): Promise<Article> {
 
   const preamble = $('#preamble').html() || '';
 
+  // Parse table of contents to get valid heading IDs
+  const validHeadingIds = parseTableOfContents($);
+
   const sections: ArticleSection[] = [];
-  let autoNumber = 1; // Counter for headings without explicit numbers
+
+  // First pass: collect all explicitly numbered sections
+  const usedNumbers = new Set<string>();
+  const headingsData: Array<{
+    element: any;
+    identifier: string;
+    fullHeading: string;
+    explicitNumber: string | null;
+  }> = [];
 
   $('#main-text h2, #main-text h3, #main-text h4, #main-text h5, #main-text h6').each((_, element) => {
     // Check for id or name on the heading element itself
@@ -238,20 +298,82 @@ export async function fetchArticleContent(id: ArticleID): Promise<Article> {
     // Skip headings without any identifier (used for emphasis)
     if (!identifier) return;
 
-    // content e.g. "2.2.2.4 Completeness as semi-decidability" -> heading = "Completeness as semi-decidability"
+    // Skip headings not in the TOC (excludes Bibliography, Academic Tools, etc.)
+    if (validHeadingIds.size > 0 && !validHeadingIds.has(identifier)) return;
+
     const fullHeading = $(element).text().trim();
     const numberMatch = fullHeading.match(/^([\d.]+)\s+/);
-    let number = numberMatch ? numberMatch[1].trim().replace(/\.$/, "") : '';
+    const explicitNumber = numberMatch ? numberMatch[1].trim().replace(/\.$/, "") : null;
 
-    // If no number found, assign sequential number
-    if (!number) {
-      number = String(autoNumber++);
+    if (explicitNumber) {
+      usedNumbers.add(explicitNumber);
+      // Also track parent numbers (e.g., if "2.3.1" is used, mark "2" and "2.3" as used)
+      const parts = explicitNumber.split('.');
+      for (let i = 1; i < parts.length; i++) {
+        usedNumbers.add(parts.slice(0, i).join('.'));
+      }
     }
 
-    const heading = numberMatch ? fullHeading.slice(numberMatch[1].length).replace(/^\./, "").trim() : fullHeading;
+    headingsData.push({
+      element,
+      identifier,
+      fullHeading,
+      explicitNumber
+    });
+  });
+
+  // Second pass: assign numbers to unnumbered sections
+  // Strategy: Unnumbered sections get sub-numbers based on their position
+  // E.g., between "3.2" and "3.3", unnumbered sections become "3.2.1", "3.2.2", etc.
+
+  for (let i = 0; i < headingsData.length; i++) {
+    const data = headingsData[i];
+    let number: string;
+
+    if (data.explicitNumber) {
+      number = data.explicitNumber;
+    } else {
+      // Find the previous numbered section
+      let prevNumber: string | null = null;
+      for (let j = i - 1; j >= 0; j--) {
+        if (headingsData[j].explicitNumber) {
+          prevNumber = headingsData[j].explicitNumber;
+          break;
+        }
+      }
+
+      if (prevNumber) {
+        // Count how many consecutive unnumbered sections came before this one
+        // (after the last numbered section)
+        let subIndex = 1;
+        for (let j = i - 1; j >= 0 && !headingsData[j].explicitNumber; j--) {
+          subIndex++;
+        }
+
+        // Generate sub-number: prevNumber.subIndex
+        number = `${prevNumber}.${subIndex}`;
+        while (usedNumbers.has(number)) {
+          subIndex++;
+          number = `${prevNumber}.${subIndex}`;
+        }
+      } else {
+        // No previous numbered section, use sequential integers
+        let autoNumber = 1;
+        while (usedNumbers.has(String(autoNumber))) {
+          autoNumber++;
+        }
+        number = String(autoNumber);
+      }
+
+      usedNumbers.add(number);
+    }
+
+    const heading = data.explicitNumber
+      ? data.fullHeading.slice(data.explicitNumber.length).replace(/^[\s.]+/, "").trim()
+      : data.fullHeading;
 
     let content = '';
-    let nextSibling = (element as any).nextSibling;
+    let nextSibling = (data.element as any).nextSibling;
 
     while (nextSibling) {
       // Check if it's a heading element (stop here)
@@ -277,14 +399,14 @@ export async function fetchArticleContent(id: ArticleID): Promise<Article> {
     }
 
     // some sections may be empty (e.g. a heading with subheadings but no content of its own)
-    if (!content.trim()) return;
+    if (!content.trim()) continue;
 
     sections.push({
       number,
       heading,
       content
     });
-  });
+  }
 
   // Process figures in preamble and sections to normalize them
   const processedPreamble = await processFiguresInContent(preamble, url);
