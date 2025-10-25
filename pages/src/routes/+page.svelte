@@ -125,6 +125,10 @@
     } catch (error) {
       console.error("Error querying oracle:", error);
 
+      // Restore the query back to the input field on error
+      query = currentQuery;
+      setTimeout(() => autoResizeTextarea(), 0);
+
       // Extract the error message from the Error object
       const errorMessage =
         error instanceof Error
