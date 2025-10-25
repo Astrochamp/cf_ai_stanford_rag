@@ -120,6 +120,7 @@ export function turnstileMiddleware(options: TurnstileOptions): (req: Request, r
         return res.status(400).json({
           status: 'error',
           message: 'Turnstile token is required',
+          code: 'missing_turnstile_token',
         });
       }
 
@@ -147,6 +148,7 @@ export function turnstileMiddleware(options: TurnstileOptions): (req: Request, r
         return res.status(500).json({
           status: 'error',
           message: 'Failed to verify Turnstile token',
+          code: 'turnstile_verification_failed',
         });
       }
 
@@ -157,6 +159,7 @@ export function turnstileMiddleware(options: TurnstileOptions): (req: Request, r
         return res.status(403).json({
           status: 'error',
           message: 'Turnstile verification failed',
+          code: 'invalid_turnstile_token',
         });
       }
 
@@ -167,6 +170,7 @@ export function turnstileMiddleware(options: TurnstileOptions): (req: Request, r
       res.status(500).json({
         status: 'error',
         message: 'Internal server error during Turnstile verification',
+        code: 'turnstile_internal_error',
       });
     }
   };

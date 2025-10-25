@@ -124,11 +124,17 @@
       results = [result, ...results];
     } catch (error) {
       console.error("Error querying oracle:", error);
+
+      // Extract the error message from the Error object
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : "Sorry, I encountered an error while processing your query. Please try again.";
+
       const errorResult: Message = {
         id: crypto.randomUUID(),
         role: "assistant",
-        content:
-          "Sorry, I encountered an error while processing your query. Please try again.",
+        content: errorMessage,
         timestamp: new Date(),
         query: currentQuery,
       };
@@ -598,7 +604,7 @@
                   ? 'text-stone-400'
                   : 'text-stone-600'}"
               >
-                This may take a minute or two.
+                This may take up to 30 seconds.
               </span>
             </div>
           </div>

@@ -79,13 +79,8 @@ const limiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: true,
 });
+
 app.use('/search', limiter);
-
-// TEMP - to find "magic number" for trust proxy
-app.get('/ip', (request, response) => {
-	response.send(request.ip);
-});
-
 
 // ============================================================================
 // API ENDPOINTS
@@ -108,11 +103,21 @@ app.post('/search', turnstile, async (req, res) => {
     const rrfTopK = 50;
 
     if (!query || typeof query !== 'string' || query.trim().length === 0 || query.length > 4000) {
-      return res.status(400).json({ error: 'Query is required and must be a non-empty string with a maximum length of 4000 characters' });
+      return res.status(400).json(
+        {
+          error: 'Query is required and must be a non-empty string with a maximum length of 4000 characters',
+          code: 'invalid_query'
+        }
+      );
     }
 
     if (topK < 1 || topK > 12 || !Number.isInteger(topK)) {
-      return res.status(400).json({ error: 'topK must be an integer between 1 and 12 (inclusive)' });
+      return res.status(400).json(
+        {
+        error: 'topK must be an integer between 1 and 12 (inclusive)',
+        code: 'invalid_topK'
+        }
+      );
     }
 
     // Classify query relevance before proceeding with RAG
@@ -121,6 +126,7 @@ app.post('/search', turnstile, async (req, res) => {
     if (relevance === 'not_relevant') {
       return res.status(400).json({
         error: 'Query not relevant',
+        code: 'query_not_relevant',
         message: 'Your query does not appear to be related to philosophy. This search system is designed for philosophical topics, theories, arguments, and related academic content.'
       });
     }
@@ -164,6 +170,7 @@ app.post('/search', turnstile, async (req, res) => {
     console.error('Search error:', error);
     return res.status(500).json({
       error: 'Internal server error',
+      code: 'internal_server_error'
     });
   }
 });
@@ -216,6 +223,7 @@ app.post('/ingest', verifyWorkerAuth, async (req, res) => {
     console.error('Ingestion endpoint error:', error);
     return res.status(500).json({
       error: 'Internal server error',
+      code: 'internal_server_error'
     });
   }
 });
@@ -312,6 +320,7 @@ app.post('/ingest-updates', verifyWorkerAuth, async (req, res) => {
     console.error('Update ingestion endpoint error:', error);
     return res.status(500).json({
       error: 'Internal server error',
+      code: 'internal_server_error'
     });
   }
 });
