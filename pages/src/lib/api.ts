@@ -13,7 +13,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   'turnstile_internal_error': 'An error occurred during CAPTCHA verification. Please refresh the page and try again.',
   'invalid_query': 'Your query is invalid. Please ensure it\'s not empty and doesn\'t exceed 4000 characters.',
   'invalid_topK': 'Invalid search parameters. Please refresh the page and try again.',
-  'query_not_relevant': 'Your question doesn\'t appear to be related to philosophy. This search system is designed for philosophical topics, theories, arguments, and related academic content. Please try asking a philosophy-related question.',
+  'query_not_relevant': 'Your question doesn\'t appear to be related to philosophy. The SEP Oracle is designed for asking about philosophical topics, theories, arguments, and related academic content. Please try asking a philosophy-related question.',
   'internal_server_error': 'Sorry, something went wrong on our end. Please try again in a moment.',
 };
 
